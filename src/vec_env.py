@@ -1,8 +1,9 @@
 import os
 import sys
 import traci
+import math
+from task_generator import generate_random_task
 
-# بررسی وجود مسیر SUMO در متغیرهای سیستم
 if 'SUMO_HOME' in os.environ:
     tools = os.path.join(os.environ['SUMO_HOME'], 'tools')
     sys.path.append(tools)
@@ -12,65 +13,74 @@ else:
 class VECEnv:
     def __init__(self, sumocfg_path, rsus):
         self.sumocfg = sumocfg_path
-        self.rsus = rsus  # لیستی از دیکشنری‌های مشخصات RSU
-        
-        # ساخت صف خالی برای هر RSU جهت مدیریت وظایف در آینده
+        self.rsus = rsus
         self.queues = {r["id"]: [] for r in rsus}
+        self.current_time = 0
         
     def reset(self):
-        # راه‌اندازی شبیه‌ساز در پس‌زمینه با رابط TraCI
         traci.start(["sumo", "-c", self.sumocfg])
-        print("✅ SUMO Started Successfully via TraCI!")
+        self.current_time = 0
         return self._get_state()
         
     def step(self):
-        # جلو بردن شبیه‌ساز به اندازه یک گام زمانی
         traci.simulationStep()
+        self.current_time += 1
         
-        # استخراج آیدی تمام ماشین‌های فعال در این لحظه
         vehicle_ids = traci.vehicle.getIDList()
-        vehicles_info = []
+        step_data = []
         
         for v_id in vehicle_ids:
-            # دریافت موقعیت مکانی و سرعت هر ماشین
             pos = traci.vehicle.getPosition(v_id)
             speed = traci.vehicle.getSpeed(v_id)
-            vehicles_info.append({"id": v_id, "position": pos, "speed": speed})
             
-        return vehicles_info
+            # 1. پیدا کردن RSUهایی که این ماشین در برد 400 متری آنهاست
+            connected_rsus = []
+            for rsu in self.rsus:
+                distance = math.dist(pos, (rsu["x"], rsu["y"]))
+                if distance <= rsu["range"]:
+                    connected_rsus.append({"rsu_id": rsu["id"], "distance": distance})
+            
+            # 2. تولید یک وظیفه جدید برای این ماشین در این لحظه
+            new_task = generate_random_task(v_id, self.current_time)
+            
+            step_data.append({
+                "id": v_id, 
+                "position": pos, 
+                "speed": speed,
+                "connected_rsus": connected_rsus,
+                "task": new_task
+            })
+            
+        return step_data
         
     def _get_state(self):
-        # فعلاً یک حالت خالی برمی‌گردانیم تا در فازهای بعدی ساختار RL تکمیل شود
         return {}
 
     def close(self):
-        # بستن امن ارتباط با شبیه‌ساز
         traci.close()
-        print("🛑 SUMO Closed.")
 
 # ---------------- بلوک تست کد ----------------
 if __name__ == "__main__":
-    # تعریف دو RSU فرضی برای تست اولیه
+    # تعریف دو RSU با برد 400 متر طبق مقاله
     test_rsus = [
         {"id": "RSU1", "x": 100, "y": 100, "range": 400},
         {"id": "RSU2", "x": 300, "y": 200, "range": 400}
     ]
     
-    # آدرس فایل کانفیگ نسبت به پوشه src
     config_file = "../sumo/osm.sumocfg" 
     
-    # ساخت محیط
     env = VECEnv(config_file, test_rsus)
     env.reset()
     
-    # شبیه‌ساز را برای 15 ثانیه (قدم) اجرا می‌کنیم تا حرکت ماشین‌ها را ببینیم
-    for i in range(15):
+    # اجرای 5 قدم برای تست
+    for i in range(5):
         print(f"\n--- Time Step {i} ---")
         info = env.step()
-        print(f"Active Vehicles: {len(info)}")
         
         if len(info) > 0:
-            # چاپ اطلاعات اولین ماشین برای نمونه
-            print(f"Sample Data -> ID: {info[0]['id']}, Pos: {info[0]['position']}, Speed: {info[0]['speed']:.2f} m/s")
+            veh = info[0]
+            print(f"Vehicle: {veh['id']}, Speed: {veh['speed']:.2f}")
+            print(f"   -> Connected RSUs: {veh['connected_rsus']}")
+            print(f"   -> Generated Task: Size={veh['task']['rho']:.2f}MB, Deadline={veh['task']['d']:.2f}s")
             
     env.close()
