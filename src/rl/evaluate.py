@@ -1,37 +1,47 @@
+import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
+import os
 
-def draw_evaluation_charts():
-    # داده‌هایی که از اجرای سه الگوریتم به دست آوردیم
-    # توجه: پاداش‌ها منفی هستند (چون مجموع جریمه تاخیر و انرژی است)، 
-    # برای نمایش بهتر در نمودار، ما قدر مطلق (مقدار مثبت) آن‌ها را به عنوان "هزینه کل" نشان می‌دهیم.
-    # هرچه این ستون کوتاه‌تر باشد، یعنی الگوریتم بهتر کار کرده است.
+def plot_baselines():
+    print("📊 Generating Baselines Comparison Chart...")
+    methods = {"CoTOP (Ours)": "cotop_log.csv", "DDQN": "ddqn_log.csv", 
+               "Greedy": "greedy_log.csv", "Local": "local_log.csv"}
     
-    algorithms = ['CoTOP (A3C)', 'Local (No Collab)', 'Greedy']
-    # تبدیل پاداش‌های منفی به هزینه (Cost)
-    costs = [264.24, 342.32, 358.43] 
-    
-    # تنظیمات استایل نمودار
-    plt.figure(figsize=(8, 6))
-    plt.style.use('ggplot') # استفاده از استایل زیبا
-    
-    # رسم نمودار میله‌ای
-    bars = plt.bar(algorithms, costs, color=['#2ca02c', '#1f77b4', '#d62728'], width=0.5)
-    
-    # اضافه کردن جزئیات متنی
-    plt.title('Total System Cost Comparison (Delay + Energy)', fontsize=14, fontweight='bold')
-    plt.ylabel('Total Cost (Lower is Better)', fontsize=12)
-    plt.xlabel('Offloading Strategy', fontsize=12)
-    
-    # نوشتن اعداد دقیق روی هر ستون
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2.0, yval + 5, f'{yval}', ha='center', va='bottom', fontweight='bold')
-        
-    # نمایش نمودار
-    plt.tight_layout()
-    plt.show()
+    avg_rewards = {}
+    for name, file in methods.items():
+        path = f"../results/{file}"
+        if os.path.exists(path):
+            df = pd.read_csv(path)
+            avg_rewards[name] = df["reward"].mean()
+        else:
+            print(f"⚠️ Warning: {file} not found.")
+
+    if avg_rewards:
+        plt.figure(figsize=(8, 5))
+        plt.bar(avg_rewards.keys(), avg_rewards.values(), color=['#2ca02c', '#1f77b4', '#ff7f0e', '#d62728'])
+        plt.title('Average Reward Comparison (Higher is Better)', fontweight='bold')
+        plt.ylabel('Average Reward')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.savefig("../results/baseline_comparison.png")
+        print("✅ Baseline chart saved to 'results/baseline_comparison.png'")
+
+def plot_ablation():
+    print("📊 Generating Ablation Study Chart...")
+    path = "../results/ablation_log.csv"
+    if os.path.exists(path):
+        df = pd.read_csv(path)
+        plt.figure(figsize=(8, 5))
+        plt.bar(df["Test_Condition"], df["Total_Reward"], color='#9467bd')
+        plt.title('Ablation Study (Impact of Modules)', fontweight='bold')
+        plt.ylabel('Total Reward')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.savefig("../results/ablation_chart.png")
+        print("✅ Ablation chart saved to 'results/ablation_chart.png'")
+    else:
+        print("⚠️ Warning: ablation_log.csv not found.")
 
 if __name__ == "__main__":
-    print("🚀 Generating Evaluation Plots...")
-    draw_evaluation_charts()
+    os.makedirs("../results", exist_ok=True)
+    plot_baselines()
+    plot_ablation()
+    plt.show()
