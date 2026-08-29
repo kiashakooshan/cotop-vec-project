@@ -4,6 +4,16 @@ import torch
 import time
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import csv
+def log_episode(method_name, episode, total_reward):
+    os.makedirs("../results", exist_ok=True)
+    file_path = f"../results/{method_name}_log.csv"
+    write_header = not os.path.exists(file_path)
+    with open(file_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["episode", "reward"])
+        writer.writerow([episode, total_reward])
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -84,7 +94,7 @@ def train():
         optimizer.step()
         
         print(f"✅ Episode {episode + 1}/{MAX_EPISODES} | Reward: {sum(rewards):.2f} | Loss: {total_loss.item():.4f}")
-        
+        log_episode("cotop", episode + 1, sum(rewards))
         env.close()
         all_episode_rewards.append(sum(rewards))
         

@@ -10,6 +10,16 @@ from collections import deque
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
+import csv
+def log_episode(method_name, episode, total_reward):
+    os.makedirs("../results", exist_ok=True)
+    file_path = f"../results/{method_name}_log.csv"
+    write_header = not os.path.exists(file_path)
+    with open(file_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["episode", "reward"])
+        writer.writerow([episode, total_reward])
 
 MAX_EPISODES = 50
 MAX_STEPS_PER_EPISODE = 300
@@ -90,6 +100,7 @@ def train_ddqn():
             target_net.load_state_dict(online_net.state_dict())
             
         print(f"✅ DDQN Agent - Episode {episode + 1}/{MAX_EPISODES} | Total Reward: {total_reward:.2f}")
+        log_episode("ddqn", episode + 1, total_reward)
         env.close()
 
 if __name__ == "__main__":

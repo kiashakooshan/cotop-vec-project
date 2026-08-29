@@ -3,6 +3,16 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
+import csv
+def log_episode(method_name, episode, total_reward):
+    os.makedirs("../results", exist_ok=True)
+    file_path = f"../results/{method_name}_log.csv"
+    write_header = not os.path.exists(file_path)
+    with open(file_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["episode", "reward"])
+        writer.writerow([episode, total_reward])
 
 MAX_EPISODES = 50
 MAX_STEPS_PER_EPISODE = 300
@@ -37,6 +47,7 @@ def evaluate_greedy():
                 
         total_rewards.append(episode_reward)
         print(f"✅ Greedy Agent - Episode {episode + 1}/{MAX_EPISODES} | Total Reward: {episode_reward:.2f}")
+        log_episode("greedy", episode + 1, episode_reward)
         env.close()
         
     avg_reward = sum(total_rewards) / len(total_rewards)
