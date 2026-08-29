@@ -3,6 +3,7 @@ import os
 import torch
 import time
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -26,6 +27,8 @@ def train():
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
     
     print(f"🚀 Training Started (LR={LEARNING_RATE}, Episodes={MAX_EPISODES})...")
+
+    all_episode_rewards = []
     
     for episode in range(MAX_EPISODES):
         # باز کردن نقشه گرافیکی فقط برای اپیزود اول
@@ -83,8 +86,25 @@ def train():
         print(f"✅ Episode {episode + 1}/{MAX_EPISODES} | Reward: {sum(rewards):.2f} | Loss: {total_loss.item():.4f}")
         
         env.close()
+        all_episode_rewards.append(sum(rewards))
         
     print("🏁 Training Finished Successfully!")
+
+    # --- بخش جدید: ذخیره مدل ---
+    torch.save(agent.state_dict(), "cotop_trained_model.pth")
+    print("💾 Model saved successfully as 'cotop_trained_model.pth'")
+    
+    # --- بخش جدید: رسم نمودار یادگیری ---
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, MAX_EPISODES + 1), all_episode_rewards, marker='o', linestyle='-', color='b')
+    plt.title('A3C Learning Curve (Total Reward over Episodes)', fontsize=14, fontweight='bold')
+    plt.xlabel('Episode', fontsize=12)
+    plt.ylabel('Total Reward (Higher is Better)', fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig("learning_curve.png")
+    print("📊 Learning curve plot saved as 'learning_curve.png'")
+    plt.show()
 
 if __name__ == "__main__":
     train()
