@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!-- generated on 2026-08-28T20:18:25.217997+03:30 by Eclipse SUMO sumo 1.27.1
+<!-- generated on 2026-08-29T12:07:05.061955+03:30 by Eclipse SUMO GUI 1.27.1
 <sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
 
     <input>
-        <net-file value="../sumo/osm.net.xml.gz"/>
-        <route-files value="../sumo/osm.passenger.trips.xml"/>
+        <net-file value="C:\Users\SARIR\cotop-project\sumo\osm.net.xml.gz"/>
+        <route-files value="C:\Users\SARIR\cotop-project\sumo\osm.passenger.trips.xml"/>
     </input>
 
     <output>
-        <tripinfo-output value="../sumo/tripinfos.xml"/>
-        <statistic-output value="../sumo/stats.xml"/>
+        <tripinfo-output value="C:\Users\SARIR\cotop-project\sumo\tripinfos.xml"/>
+        <statistic-output value="C:\Users\SARIR\cotop-project\sumo\stats.xml"/>
     </output>
 
     <processing>
@@ -29,17 +29,4 @@
         <no-step-log value="true"/>
     </report>
 
-    <traci_server>
-        <remote-port value="9264"/>
-    </traci_server>
-
-    <gui_only>
-        <quit-on-end value="true"/>
-        <start value="true"/>
-    </gui_only>
-
 </sumoConfiguration>
--->
-
-<tripinfos xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/tripinfo_file.xsd">
-</tripinfos>

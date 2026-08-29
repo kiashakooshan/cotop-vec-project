@@ -12,18 +12,15 @@ from rl.a3c_agent import ActorCritic
 LEARNING_RATE = 0.0002 
 GAMMA = 0.95
 MAX_EPISODES = 50
-MAX_STEPS_PER_EPISODE = 20
+MAX_STEPS_PER_EPISODE = 300  # حالا ماشین ها 5 دقیقه در نقشه حرکت می کنند
 
 def train():
-    test_rsus = [
-        {"id": "RSU1", "x": 100, "y": 100, "range": 400},
-        {"id": "RSU2", "x": 300, "y": 200, "range": 400}
-    ]
     config_file = "../sumo/osm.sumocfg" 
-    env = VECEnv(config_file, test_rsus)
+    rsus_file = "../sumo/rsus.json"
+    env = VECEnv(config_file, rsus_file)
     
-    state_dim = 6 
-    action_dim = 3 
+    state_dim = 10  # 4 ویژگی ماشین + صف 6 عدد RSU
+    action_dim = 6  # انتخاب بین 6 دستگاه RSU
     
     agent = ActorCritic(state_dim, action_dim)
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)

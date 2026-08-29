@@ -9,12 +9,9 @@ MAX_EPISODES = 5
 MAX_STEPS_PER_EPISODE = 20
 
 def evaluate_greedy():
-    test_rsus = [
-        {"id": "RSU1", "x": 100, "y": 100, "range": 400},
-        {"id": "RSU2", "x": 300, "y": 200, "range": 400}
-    ]
     config_file = "../sumo/osm.sumocfg" 
-    env = VECEnv(config_file, test_rsus)
+    rsus_file = "../sumo/rsus.json"
+    env = VECEnv(config_file, rsus_file)
     
     print("🚀 Starting Greedy Baseline Evaluation...")
     total_rewards = []
