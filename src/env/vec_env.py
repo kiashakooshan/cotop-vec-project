@@ -20,20 +20,23 @@ else:
     sys.exit("Error: Please declare environment variable 'SUMO_HOME'")
 
 class VECEnv:
-    def __init__(self, sumocfg_path, rsus_json_path="../sumo/rsus.json"):
+    def __init__(self, sumocfg_path, rsus_json_path="../sumo/rsus.json", 
+                 use_mobility_detector=True, use_priority=True, use_collaboration=True):
         self.sumocfg = sumocfg_path
         
-        # 1. Dynamically load RSUs from your JSON file (Works for 6 RSUs seamlessly)
+        self.use_mobility_detector = use_mobility_detector
+        self.use_priority = use_priority
+        self.use_collaboration = use_collaboration
+        
         with open(rsus_json_path, 'r') as f:
             self.rsus = json.load(f)
             
-        # Initialize an empty queue list for each RSU
         self.queues = {r["id"]: [] for r in self.rsus}
         self.current_time = 0
         
-        # 2. Initialize the Mobility Detector (GAT + GRU)
-        self.mobility_model = MobilityDetector(in_dim=2, hidden=32, gru_hidden=64)
-        self.mobility_model.eval() 
+        if self.use_mobility_detector:
+            self.mobility_model = MobilityDetector(in_dim=2, hidden=32, gru_hidden=64)
+            self.mobility_model.eval()
         
     def reset(self, render=False):
         if render:
@@ -95,48 +98,64 @@ class VECEnv:
         
         if len(vehicle_ids) > 0:
             v_id = vehicle_ids[0]
+            pos = traci.vehicle.getPosition(v_id)
             
-            # ۱. استخراج موقعیت تمام ماشین‌های فعال برای ساخت گراف
+            # --- اصلاح 1: محاسبه واقعی T_stay با کمک گراف ---
             all_positions = [traci.vehicle.getPosition(v) for v in vehicle_ids]
             edge_index = self._build_graph(vehicle_ids)
-            
-            # تبدیل به تنسور با ابعاد: [تعداد ماشین‌ها, طول توالی=1, ویژگی‌ها=2]
             x_seq = torch.tensor(all_positions, dtype=torch.float32).unsqueeze(1)
             
-            # ۲. ارسال گراف کامل به مدل تحرک GAT+GRU
             with torch.no_grad():
-                predicted_future = self.mobility_model(x_seq, [edge_index], future_steps=1)
+                predicted_future = self.mobility_model(x_seq, [edge_index], future_steps=5)
             
-            predicted_t_stay = 20.0 # فرض زمان خروج برای ادامه محاسبات
+            selected_rsu_idx = action if action < len(self.rsus) else 0
+            current_rsu = self.rsus[selected_rsu_idx]
             
-            # ۳. بقیه منطق تولید وظیفه برای ماشین نماینده
+            # پیدا کردن زمان خروج از پوشش
+            future_positions = predicted_future[0]
+            predicted_t_stay = 5.0 # پیش‌فرض
+            for step_idx, future_pos in enumerate(future_positions):
+                dist_to_rsu = math.dist((future_pos[0].item(), future_pos[1].item()), (current_rsu["x"], current_rsu["y"]))
+                if dist_to_rsu > current_rsu["range"]:
+                    predicted_t_stay = float(step_idx + 1)
+                    break
+            # ----------------------------------------------
+            
             task = generate_random_task(v_id, self.current_time)
             task["T_stay"] = predicted_t_stay 
             
-            selected_rsu_idx = action if action < len(self.rsus) else 0
-            selected_rsu_id = self.rsus[selected_rsu_idx]["id"]
+            self.queues[current_rsu["id"]].append(task)
+            self.queues[current_rsu["id"]] = sort_tasks_by_priority(self.queues[current_rsu["id"]])
+            top_task = self.queues[current_rsu["id"]].pop(0)
             
-            self.queues[selected_rsu_id].append(task)
-            self.queues[selected_rsu_id] = sort_tasks_by_priority(self.queues[selected_rsu_id])
-            top_task = self.queues[selected_rsu_id].pop(0)
+            # --- اصلاح 2: محاسبه واقعی تاخیر و انرژی بر اساس فاصله ---
+            distance = math.dist(pos, (current_rsu["x"], current_rsu["y"]))
+            rate = models.v2r_rate(B=10, P_v=0.5, K=1e-3, omega=1e-9, distance=max(distance, 1.0), sigma=2)
             
-            delay = models.processing_delay(top_task["phi"], 2.0)
-            energy = delay * 5.0 
-            total_delay = delay + 0.1 
+            t_up = models.upload_delay(top_task["rho"], rate)
+            F_rsu = current_rsu.get("capacity", 2.0)
+            t_pro = models.processing_delay(top_task["phi"], F_rsu)
+            
+            queue_load = sum(t["phi"] for t in self.queues[current_rsu["id"]])
+            t_wait = models.waiting_delay(queue_load, F_rsu)
+            
+            total_delay = t_up + t_pro + t_wait
+            
+            E_V2R = 0.1 
+            E_RSU = 0.05
+            energy = t_up * E_V2R + t_pro * E_RSU
             
             if total_delay > top_task["d"]:
                 reward = -100.0
             else:
-                reward = -(total_delay + energy)
+                sigma_w = 0.5
+                reward = -(sigma_w * total_delay + (1 - sigma_w) * energy)
+            # ----------------------------------------------
                 
         next_state = self._get_state(vehicle_ids)
         return next_state, reward, done, []
         
     def _get_state(self, vehicle_ids=None):
-        """
-        Converts the environment into a Tensor array.
-        Dynamically scales: [X, Y, Task_Size, Deadline, Queue_RSU1, Queue_RSU2, ... Queue_RSU6]
-        """
         if vehicle_ids is None:
             try:
                 vehicle_ids = traci.vehicle.getIDList()
@@ -150,11 +169,21 @@ class VECEnv:
             task = generate_random_task(v_id, self.current_time)
             state = [pos[0], pos[1], task["rho"], task["d"]]
             
-        # Dynamically append the load of EVERY RSU in the JSON file
         for rsu in self.rsus:
             total_load = sum(t["phi"] for t in self.queues[rsu["id"]])
             state.append(total_load)
             
+        # --- اصلاح 5: نرمال‌سازی State ---
+        MAP_W, MAP_H = 2000.0, 1000.0 # ابعاد حدودی نقشه شما
+        state[0] /= MAP_W
+        state[1] /= MAP_H
+        state[2] /= 5.0  # رنج حجم دیتا
+        state[3] /= 30.0 # رنج مهلت
+        
+        for i in range(4, len(state)):
+            state[i] /= 50.0 # نرمال‌سازی بار صف‌ها
+        # ---------------------------------
+        
         return np.array(state, dtype=np.float32)
 
     def close(self):
