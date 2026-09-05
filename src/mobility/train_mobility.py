@@ -8,10 +8,10 @@ import traci
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from mobility.gat_gru import MobilityDetector
+from env.fleet_manager import FleetManager # --- اضافه شدن مدیر ناوگان ---
 
 def build_graph(vehicle_ids, positions, max_distance=100.0):
     edges = []
-    # گراف فقط برای ماشین‌هایی ساخته می‌شود که تاریخچه کامل دارند
     for i, v1 in enumerate(vehicle_ids):
         for j, v2 in enumerate(vehicle_ids):
             if i != j and math.dist(positions[v1], positions[v2]) < max_distance:
@@ -26,6 +26,10 @@ def train_gat_gru():
     sumocfg = "../sumo/osm.sumocfg"
     traci.start(["sumo", "-c", sumocfg, "--start", "--quit-on-end"])
     
+    # --- ساخت 40 ماشین در ثانیه صفر ---
+    fleet_manager = FleetManager(num_vehicles=40)
+    fleet_manager.spawn_fixed_fleet()
+    
     model = MobilityDetector(in_dim=2, hidden=32, gru_hidden=64)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.MSELoss() 
@@ -35,6 +39,9 @@ def train_gat_gru():
     
     for step in range(epochs):
         traci.simulationStep()
+        # --- حفظ ماشین‌ها در نقشه ---
+        fleet_manager.keep_fleet_closed()
+        
         vehicle_ids = traci.vehicle.getIDList()
         
         if len(vehicle_ids) < 2:
@@ -42,29 +49,23 @@ def train_gat_gru():
             
         positions = {v_id: traci.vehicle.getPosition(v_id) for v_id in vehicle_ids}
         
-        # 1. جمع‌آوری و آپدیت تاریخچه برای همه ماشین‌ها
         for v_id in vehicle_ids:
             if v_id not in vehicle_history:
                 vehicle_history[v_id] = []
             vehicle_history[v_id].append([positions[v_id][0], positions[v_id][1]])
             
-            # نگه داشتن فقط 6 گام آخر (5 تا برای تاریخچه + 1 برای هدف)
             if len(vehicle_history[v_id]) > 6:
                 vehicle_history[v_id].pop(0)
                 
-        # 2. فیلتر کردن ماشین‌هایی که دیتای کافی دارند
         valid_vids = [v_id for v_id in vehicle_ids if len(vehicle_history[v_id]) == 6]
         
         if len(valid_vids) > 0:
-            # 3. ساخت ورودی‌ها (Batch) فقط برای ماشین‌های معتبر
             x_list = [vehicle_history[v][:5] for v in valid_vids]
-            # تغییر ابعاد به [N, 1, 2] برای حل اخطار UserWarning
             y_list = [[vehicle_history[v][5]] for v in valid_vids] 
             
             x_seq = torch.tensor(x_list, dtype=torch.float32)
             y_true = torch.tensor(y_list, dtype=torch.float32)
             
-            # گراف متناسب با سایز Batch جدید ساخته می‌شود
             edge_index = build_graph(valid_vids, positions)
             
             optimizer.zero_grad()

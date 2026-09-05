@@ -7,10 +7,14 @@ import torch.nn.functional as F
 import random
 import numpy as np
 from collections import deque
+import csv
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
-import csv
+
+MAX_EPISODES = 50
+MAX_STEPS_PER_EPISODE = 300
+
 def log_episode(method_name, episode, total_reward):
     os.makedirs("../results", exist_ok=True)
     file_path = f"../results/{method_name}_log.csv"
@@ -21,8 +25,16 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-MAX_EPISODES = 50
-MAX_STEPS_PER_EPISODE = 300
+# --- توابع ثبت گزارش‌های پیشرفته برای DDQN ---
+def log_advanced_metrics(method_name, energy, avg_makespan, max_makespan):
+    file_path = f"../results/{method_name}_metrics.csv"
+    write_header = not os.path.exists(file_path)
+    with open(file_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["energy", "avg_makespan", "max_makespan"])
+        writer.writerow([energy, avg_makespan, max_makespan])
+# ---------------------------------------------
 
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -40,8 +52,8 @@ def train_ddqn():
     rsus_file = "../sumo/rsus.json"
     env = VECEnv(config_file, rsus_file)
     
-    # آپدیت ابعاد برای 6 عدد RSU
-    state_dim = 10
+    # آپدیت ابعاد فضای حالت به 8 
+    state_dim = 8
     action_dim = 6
     
     online_net = QNetwork(state_dim, action_dim)
@@ -51,6 +63,12 @@ def train_ddqn():
     optimizer = optim.Adam(online_net.parameters(), lr=0.001)
     buffer = deque(maxlen=5000)
     
+    # پاک کردن لاگ‌های قدیمی
+    if os.path.exists("../results/ddqn_log.csv"):
+        os.remove("../results/ddqn_log.csv")
+    if os.path.exists("../results/ddqn_metrics.csv"):
+        os.remove("../results/ddqn_metrics.csv")
+        
     print(f"🚀 Starting DDQN Baseline Training ({MAX_EPISODES} Episodes)...")
     for episode in range(MAX_EPISODES):
         state = env.reset(render=False)
@@ -59,7 +77,6 @@ def train_ddqn():
         for step in range(MAX_STEPS_PER_EPISODE):
             state_t = torch.FloatTensor(state)
             
-            # Epsilon-Greedy با کاهش تدریجی نویز
             if random.random() < max(0.01, 0.1 - 0.01*(episode/10)):
                 action = random.randint(0, action_dim - 1)
             else:
@@ -70,7 +87,6 @@ def train_ddqn():
             total_reward += reward
             state = next_state
             
-            # اصلاح 4: آموزش واقعی شبکه با نمونه‌گیری از بافر
             if len(buffer) > 32:
                 batch = random.sample(buffer, 32)
                 states, actions, rewards_b, next_states, dones = zip(*batch)
@@ -81,7 +97,6 @@ def train_ddqn():
                 next_states_t = torch.FloatTensor(np.array(next_states))
                 dones_t = torch.FloatTensor(dones)
                 
-                # منطق Double DQN
                 next_actions = online_net(next_states_t).argmax(dim=1, keepdim=True)
                 next_q = target_net(next_states_t).gather(1, next_actions).squeeze(1)
                 target_q = rewards_t + 0.95 * next_q * (1 - dones_t)
@@ -95,12 +110,17 @@ def train_ddqn():
             if done: 
                 break
         
-        # همگام‌سازی دوره‌ای شبکه هدف (Target Network)
         if episode % 5 == 0:
             target_net.load_state_dict(online_net.state_dict())
             
         print(f"✅ DDQN Agent - Episode {episode + 1}/{MAX_EPISODES} | Total Reward: {total_reward:.2f}")
         log_episode("ddqn", episode + 1, total_reward)
+        
+        # ثبت گزارش‌های پیشرفته در پایان اپیزود
+        avg_makespan = sum(env.episode_makespans) / len(env.episode_makespans) if env.episode_makespans else 0
+        max_makespan = max(env.episode_makespans) if env.episode_makespans else 0
+        log_advanced_metrics("ddqn", env.episode_energy, avg_makespan, max_makespan)
+        
         env.close()
 
 if __name__ == "__main__":

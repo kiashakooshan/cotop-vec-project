@@ -13,17 +13,22 @@ def demonstrate_model():
     rsus_file = "../sumo/rsus.json"
     env = VECEnv(config_file, rsus_file)
     
-    state_dim = 10 # ۴ ویژگی ماشین + صف ۶ دستگاه RSU
-    action_dim = 6 # ۶ دستگاه RSU
+    # اصلاح ۱: فضای حالت به ۸ تغییر یافت (۲ ویژگی مکانی + ۶ وضعیت لود سرورها)
+    state_dim = 8 
+    action_dim = 6 
     
-    # ۱. ساختن اسکلت شبکه
     agent = ActorCritic(state_dim, action_dim)
     
-    # ۲. لود کردن وزن‌های آموزش‌دیده
-    agent.load_state_dict(torch.load("cotop_trained_model.pth"))
-    agent.eval() # قرار دادن شبکه در حالت استنتاج (بسیار مهم: خاموش کردن Dropout و غیره)
+    # اصلاح ۲: لود کردن مغز نهایی و اصلی
+    model_path = "cotop_model_final.pth"
+    if os.path.exists(model_path):
+        agent.load_state_dict(torch.load(model_path))
+        print(f"✅ Model '{model_path}' loaded successfully!")
+    else:
+        print(f"⚠️ Warning: '{model_path}' not found! Please train the model first.")
+        
+    agent.eval() 
     
-    # ۳. باز کردن گرافیک برای ارائه
     state = env.reset(render=True)
     total_reward = 0
     
@@ -34,9 +39,10 @@ def demonstrate_model():
     for step in range(MAX_STEPS):
         state_tensor = torch.FloatTensor(state)
         
-        # بدون نیاز به محاسبه گرادیان (سرعت اجرای بسیار بالا)
         with torch.no_grad(): 
-            action, _ = agent.get_action(state_tensor)
+            # اصلاح ۳: انتخاب قطعی و هوشمندانه بهترین اکشن برای اجرای بی‌نقص در ارائه
+            action_probs, _ = agent.forward(state_tensor)
+            action = torch.argmax(action_probs).item()
             
         next_state, reward, done, _ = env.step(action)
         total_reward += reward

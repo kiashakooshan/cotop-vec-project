@@ -24,7 +24,7 @@ def train_cotop():
     print("🚀 Starting Final CoTOP Training (Advantage + Exploration)...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
-    agent = ActorCritic(10, 6)
+    agent = ActorCritic(8, 6)
     optimizer = optim.Adam(agent.parameters(), lr=0.002)
     
     epochs = 50 
