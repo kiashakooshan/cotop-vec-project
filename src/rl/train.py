@@ -1,10 +1,15 @@
 import sys
 import os
 import torch
-import time
 import torch.optim as optim
-import matplotlib.pyplot as plt
+import torch.nn.functional as F
+import random
 import csv
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from env.vec_env import VECEnv
+from rl.a3c_agent import ActorCritic
+
 def log_episode(method_name, episode, total_reward):
     os.makedirs("../results", exist_ok=True)
     file_path = f"../results/{method_name}_log.csv"
@@ -15,106 +20,66 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from env.vec_env import VECEnv
-from rl.a3c_agent import ActorCritic
-
-LEARNING_RATE = 0.0002 
-GAMMA = 0.95
-MAX_EPISODES = 50
-MAX_STEPS_PER_EPISODE = 300  # حالا ماشین ها 5 دقیقه در نقشه حرکت می کنند
-
-def train():
-    config_file = "../sumo/osm.sumocfg" 
-    rsus_file = "../sumo/rsus.json"
-    env = VECEnv(config_file, rsus_file)
+def train_cotop():
+    print("🚀 Starting Final CoTOP Training (Advantage + Exploration)...")
+    env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
-    state_dim = 10  # 4 ویژگی ماشین + صف 6 عدد RSU
-    action_dim = 6  # انتخاب بین 6 دستگاه RSU
+    agent = ActorCritic(10, 6)
+    optimizer = optim.Adam(agent.parameters(), lr=0.002)
     
-    agent = ActorCritic(state_dim, action_dim)
-    optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
+    epochs = 50 
     
-    print(f"🚀 Training Started (LR={LEARNING_RATE}, Episodes={MAX_EPISODES})...")
-
-    all_episode_rewards = []
-    
-    for episode in range(MAX_EPISODES):
-        # باز کردن نقشه گرافیکی فقط برای اپیزود اول
-        if episode == 0:
-            state = env.reset(render=True)
-        else:
-            state = env.reset(render=False)
-            
-        # تبدیل state Numpy به Tensor برای شبکه عصبی
-        state = torch.FloatTensor(state)
+    # پاک کردن لاگ قدیمی آموزش تا داده‌ها قاطی نشوند
+    if os.path.exists("../results/cotop_train_log.csv"):
+        os.remove("../results/cotop_train_log.csv")
         
-        log_probs = []
-        values = []
-        rewards = []
+    for episode in range(epochs):
+        state = env.reset(render=False)
+        total_reward = 0
         
-        for step in range(MAX_STEPS_PER_EPISODE):
-            # 1. عامل RL بر اساس State واقعی تصمیم‌گیری می‌کند
-            action, log_prob = agent.get_action(state)
-            _, state_value = agent(state)
+        # اکتشاف: از 50% کارهای تصادفی شروع می‌شود و کم‌کم به 1% می‌رسد
+        epsilon = max(0.01, 0.5 - (episode / (epochs * 0.8)))
+        
+        for step in range(300):
+            state_tensor = torch.FloatTensor(state)
             
-            # 2. ارسال اکشن به محیط و دریافت نتایج جدید
-            next_state, reward, done, step_data = env.step(action)
-            next_state = torch.FloatTensor(next_state)
-
-            if episode == 0:
-                time.sleep(0.3)  # 0.3 ثانیه توقف بین هر فریم
+            action_probs, state_value = agent(state_tensor)
             
-            log_probs.append(log_prob)
-            values.append(state_value)
-            rewards.append(reward)
+            if random.random() < epsilon:
+                action = random.randint(0, 5)
+            else:
+                action = torch.argmax(action_probs).item()
+                
+            next_state, reward, done, _ = env.step(action)
+            total_reward += reward
+            
+            # --- جادوی ریاضی: استفاده از Advantage به جای پاداش خام ---
+            advantage = reward - state_value.item()
+            
+            log_prob = torch.log(action_probs[action] + 1e-10)
+            actor_loss = -log_prob * advantage
+            
+            # خطای شبکه Critic (چقدر پیش‌بینی‌اش با واقعیت فاصله داشت)
+            reward_tensor = torch.tensor([reward], dtype=torch.float32)
+            critic_loss = F.mse_loss(state_value.squeeze(), reward_tensor.squeeze())
+            
+            loss = actor_loss + critic_loss
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            # ---------------------------------------------------------
             
             state = next_state
+            if done: break
             
-            if done:
-                break
-            
-        # 3. محاسبه ضرر (Loss) و آپدیت وزن‌ها
-        Q_val = 0
-        policy_loss = 0
-        value_loss = 0
-        
-        for i in reversed(range(len(rewards))):
-            Q_val = rewards[i] + GAMMA * Q_val
-            advantage = Q_val - values[i].item()
-            
-            policy_loss = policy_loss - log_probs[i] * advantage
-            value_loss = value_loss + torch.pow(values[i] - Q_val, 2)
-            
-        total_loss = policy_loss + value_loss
-        
-        optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
-        
-        print(f"✅ Episode {episode + 1}/{MAX_EPISODES} | Reward: {sum(rewards):.2f} | Loss: {total_loss.item():.4f}")
-        log_episode("cotop", episode + 1, sum(rewards))
+        print(f"✅ Final Train - Ep {episode+1}/{epochs} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
+        log_episode("cotop_train", episode + 1, total_reward)
         env.close()
-        all_episode_rewards.append(sum(rewards))
         
-    print("🏁 Training Finished Successfully!")
-
-    # --- بخش جدید: ذخیره مدل ---
-    torch.save(agent.state_dict(), "cotop_trained_model.pth")
-    print("💾 Model saved successfully as 'cotop_trained_model.pth'")
-    
-    # --- بخش جدید: رسم نمودار یادگیری ---
-    plt.figure(figsize=(10, 5))
-    plt.plot(range(1, MAX_EPISODES + 1), all_episode_rewards, marker='o', linestyle='-', color='b')
-    plt.title('A3C Learning Curve (Total Reward over Episodes)', fontsize=14, fontweight='bold')
-    plt.xlabel('Episode', fontsize=12)
-    plt.ylabel('Total Reward (Higher is Better)', fontsize=12)
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.savefig("learning_curve.png")
-    print("📊 Learning curve plot saved as 'learning_curve.png'")
-    plt.show()
+    # ذخیره با یک نام کاملاً جدید و اختصاصی
+    torch.save(agent.state_dict(), "cotop_model_final.pth")
+    print("💾 Ultimate brain saved as 'cotop_model_final.pth'!")
 
 if __name__ == "__main__":
-    train()
+    train_cotop()

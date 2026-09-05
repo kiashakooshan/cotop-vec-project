@@ -93,11 +93,8 @@ class VECEnv:
         reward = 0
         
         if len(vehicle_ids) > 0:
-            # --- اولویت 2-ب: تولید وظایف موازی (Parallel Tasks) برای شلوغ کردن صف‌ها ---
-            # حداکثر 20 ماشین را بررسی می‌کنیم تا بار پردازشی گراف منطقی بماند
-            active_vehicles = vehicle_ids[:20]
+            active_vehicles = vehicle_ids[:20] # حداکثر 20 ماشین فعال
             
-            # 1. ساخت گراف و استخراج مختصات برای همه
             all_positions = [traci.vehicle.getPosition(v) for v in active_vehicles]
             edge_index = self._build_graph(active_vehicles)
             x_seq = torch.tensor(all_positions, dtype=torch.float32).unsqueeze(1)
@@ -106,88 +103,80 @@ class VECEnv:
                 with torch.no_grad():
                     predicted_futures = self.mobility_model(x_seq, [edge_index], future_steps=5)
             
-            # 2. تولید ترافیک پس‌زمینه (ماشین‌های 1 تا 19)
-            for idx in range(1, len(active_vehicles)):
-                bg_vid = active_vehicles[idx]
-                bg_pos = all_positions[idx]
-                bg_task = generate_random_task(bg_vid, self.current_time)
-                bg_task["T_stay"] = 10.0 # عدد ثابت برای پس‌زمینه
-                nearest_rsu = self._get_nearest_rsu(bg_pos)
-                self.queues[nearest_rsu["id"]].append(bg_task)
-                
-            # 3. پردازش ماشین اصلی (نماینده هوش مصنوعی)
-            v_id = active_vehicles[0]
-            pos = all_positions[0]
-            
             selected_rsu_idx = action if action < len(self.rsus) else 0
             if not self.use_collaboration:
                 selected_rsu_idx = 0 
             current_rsu = self.rsus[selected_rsu_idx]
-            
-            # محاسبه T_stay ماشین اصلی
-            predicted_t_stay = 15.0
-            if self.use_mobility_detector:
-                future_positions = predicted_futures[0]
-                for step_idx, future_pos in enumerate(future_positions):
-                    dist_to_rsu = math.dist((future_pos[0].item(), future_pos[1].item()), (current_rsu["x"], current_rsu["y"]))
-                    if dist_to_rsu > current_rsu["range"]:
-                        predicted_t_stay = float(step_idx + 1)
-                        break
-                        
-            task = generate_random_task(v_id, self.current_time)
-            task["T_stay"] = predicted_t_stay 
-            
-            self.queues[current_rsu["id"]].append(task)
-            
-            if self.use_priority:
-                self.queues[current_rsu["id"]] = sort_tasks_by_priority(self.queues[current_rsu["id"]])
+
+            # --- اصلاح علت 3.3 (تاثیرگذاری اکشن روی کل سیستم) ---
+            for idx in range(len(active_vehicles)):
+                v_id = active_vehicles[idx]
+                pos = all_positions[idx]
+                task = generate_random_task(v_id, self.current_time)
                 
-            top_task = self.queues[current_rsu["id"]].pop(0)
+                if idx == 0: # ماشین اصلی
+                    predicted_t_stay = 15.0
+                    if self.use_mobility_detector:
+                        future_positions = predicted_futures[0]
+                        for step_idx, future_pos in enumerate(future_positions):
+                            if math.dist((future_pos[0].item(), future_pos[1].item()), (current_rsu["x"], current_rsu["y"])) > current_rsu["range"]:
+                                predicted_t_stay = float(step_idx + 1)
+                                break
+                    task["T_stay"] = predicted_t_stay
+                    self.queues[current_rsu["id"]].append(task)
+                else: # ماشین‌های پس‌زمینه
+                    task["T_stay"] = 10.0
+                    # حالا اکشن شبکه عصبی، ماشین‌های اطراف را هم به سمت RSU انتخاب شده هدایت می‌کند!
+                    if math.dist(pos, (current_rsu["x"], current_rsu["y"])) < 500.0:
+                        self.queues[current_rsu["id"]].append(task)
+                    else:
+                        nearest_rsu = self._get_nearest_rsu(pos)
+                        self.queues[nearest_rsu["id"]].append(task)
+            # ----------------------------------------------------
+
+            # --- اصلاح علت 3.2 (محاسبه پاداش از کل سیستم) ---
+            step_delays = []
+            step_energies = []
+            deadline_misses = 0
             
-            # --- اولویت 2-الف: پردازش مشارکتی بین دو RSU (Case 2) ---
-            distance = math.dist(pos, (current_rsu["x"], current_rsu["y"]))
-            rate = models.v2r_rate(B=10, P_v=0.5, K=1e-3, omega=1e-9, distance=max(distance, 1.0), sigma=2)
-            t_up = models.upload_delay(top_task["rho"], rate)
-            F_rsu = current_rsu.get("capacity", 2.0)
-            
-            queue_load = sum(t["phi"] for t in self.queues[current_rsu["id"]])
-            t_wait = models.waiting_delay(queue_load, F_rsu)
-            
-            phi_total = top_task["phi"]
-            
-            if self.use_collaboration:
-                # محاسبه مقدار پردازش قابل انجام در زمان باقی‌مانده محلی
-                phi_done_locally = min(phi_total, predicted_t_stay * F_rsu)
-                phi_rest = phi_total - phi_done_locally
+            for rsu in self.rsus:
+                queue = self.queues[rsu["id"]]
+                if self.use_priority:
+                    queue = sort_tasks_by_priority(queue)
                 
-                if phi_rest > 0:
-                    # خودرو در حال خروج است! بخشی از وظیفه به RSU بعدی منتقل می‌شود
-                    next_rsu_idx = (selected_rsu_idx + 1) % len(self.rsus)
-                    next_rsu = self.rsus[next_rsu_idx]
+                # فرض می‌کنیم هر RSU در هر ثانیه می‌تواند حداکثر 3 وظیفه را استخراج کند
+                processed, remaining = queue[:3], queue[3:]
+                self.queues[rsu["id"]] = remaining
+                
+                for t in processed:
+                    distance = 50.0 # فاصله حدودی برای محاسبات ساده‌تر
+                    rate = models.v2r_rate(B=10, P_v=0.5, K=1e-3, omega=1e-9, distance=distance, sigma=2)
+                    t_up = models.upload_delay(t["rho"], rate)
                     
-                    r2r_rate = 100.0 # فرض نرخ ثابت بین آنتن‌ها
-                    t2 = models.upload_delay(phi_rest, r2r_rate)
-                    F_next_rsu = next_rsu.get("capacity", 2.0)
-                    t3 = models.processing_delay(phi_rest, F_next_rsu)
+                    F_rsu = rsu.get("capacity", 2.0)
+                    t_pro = models.processing_delay(t["phi"], F_rsu)
                     
-                    t1 = predicted_t_stay
-                    t_pro = max(t1, t2 + t3) # فرمول موازی‌سازی مقاله
-                else:
-                    t_pro = models.processing_delay(phi_total, F_rsu)
-            else:
-                t_pro = models.processing_delay(phi_total, F_rsu)
-            # --------------------------------------------------------
-            
-            total_delay = t_up + t_pro + t_wait
-            E_V2R = 0.1 
-            E_RSU = 0.05
-            energy = t_up * E_V2R + t_pro * E_RSU
-            
-            if total_delay > top_task["d"]:
-                reward = -100.0
-            else:
+                    queue_load = sum(x["phi"] for x in remaining)
+                    t_wait = models.waiting_delay(queue_load, F_rsu)
+                    
+                    total_delay = t_up + t_pro + t_wait
+                    energy = t_up * 0.1 + t_pro * 0.05
+                    
+                    step_delays.append(total_delay)
+                    step_energies.append(energy)
+                    
+                    if total_delay > t["d"]:
+                        deadline_misses += 1
+
+            if len(step_delays) > 0:
+                avg_delay = sum(step_delays) / max(1, len(step_delays))
+                avg_energy = sum(step_energies) / max(1, len(step_energies))
                 sigma_w = 0.5
-                reward = -(sigma_w * total_delay + (1 - sigma_w) * energy)
+                # جریمه سنگین برای از دست دادن مهلت مجاز
+                reward = -(sigma_w * avg_delay + (1 - sigma_w) * avg_energy) - (deadline_misses * 20.0) 
+            else:
+                reward = 0
+            # ----------------------------------------------------
                 
         next_state = self._get_state(vehicle_ids)
         return next_state, reward, done, []

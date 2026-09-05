@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
 from rl.a3c_agent import ActorCritic
 
-MAX_EPISODES = 10 # برای تست سریع‌تر روی ۱۰ اپیزود تنظیم شده است
+MAX_EPISODES = 50 # برای تست سریع‌تر روی ۱۰ اپیزود تنظیم شده است
 MAX_STEPS_PER_EPISODE = 300
 
 def log_episode(method_name, episode, total_reward):
