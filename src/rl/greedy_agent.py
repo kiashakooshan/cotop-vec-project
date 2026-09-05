@@ -65,9 +65,9 @@ def evaluate_greedy():
         log_episode("greedy", episode + 1, episode_reward)
         
         # استخراج و ثبت متریک‌های پیشرفته برای این اپیزود
-        avg_makespan = sum(env.episode_makespans) / len(env.episode_makespans) if env.episode_makespans else 0
+        total_makespan = sum(env.episode_makespans) if env.episode_makespans else 0
         max_makespan = max(env.episode_makespans) if env.episode_makespans else 0
-        log_advanced_metrics("greedy", env.episode_energy, avg_makespan, max_makespan)
+        log_advanced_metrics("greedy", env.episode_energy, total_makespan, max_makespan)
         
         env.close()
         

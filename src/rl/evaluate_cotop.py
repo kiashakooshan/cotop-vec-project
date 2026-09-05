@@ -76,9 +76,9 @@ def evaluate_trained_model():
         log_episode("cotop", episode + 1, episode_reward)
         
         # استخراج و ثبت متریک‌های پیشرفته برای این اپیزود
-        avg_makespan = sum(env.episode_makespans) / len(env.episode_makespans) if env.episode_makespans else 0
+        total_makespan = sum(env.episode_makespans) if env.episode_makespans else 0
         max_makespan = max(env.episode_makespans) if env.episode_makespans else 0
-        log_advanced_metrics("cotop", env.episode_energy, avg_makespan, max_makespan)
+        log_advanced_metrics("cotop", env.episode_energy, total_makespan, max_makespan)
         
         # در اپیزود آخر، خطای مسیر را برای گزارش GAT-GRU ذخیره کن
         if episode == MAX_EPISODES - 1:

@@ -21,15 +21,16 @@ def log_episode(method_name, episode, total_reward):
         writer.writerow([episode, total_reward])
 
 def train_cotop():
-    print("🚀 Starting Final CoTOP Training (Advantage + Exploration)...")
+    print("🚀 Starting The Grand CoTOP Training (500 Episodes)...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
     agent = ActorCritic(8, 6)
+    
+    # نرخ یادگیری دقیقاً مطابق مقاله تنظیم شد
     optimizer = optim.Adam(agent.parameters(), lr=0.0002)
     
-    epochs = 50 
+    epochs = 500 
     
-    # پاک کردن لاگ قدیمی آموزش تا داده‌ها قاطی نشوند
     if os.path.exists("../results/cotop_train_log.csv"):
         os.remove("../results/cotop_train_log.csv")
         
@@ -37,12 +38,11 @@ def train_cotop():
         state = env.reset(render=False)
         total_reward = 0
         
-        # اکتشاف: از 50% کارهای تصادفی شروع می‌شود و کم‌کم به 1% می‌رسد
+        # کاهش بسیار ملایم‌ترِ اکتشاف در طول 400 اپیزود اول
         epsilon = max(0.01, 0.5 - (episode / (epochs * 0.8)))
         
         for step in range(300):
             state_tensor = torch.FloatTensor(state)
-            
             action_probs, state_value = agent(state_tensor)
             
             if random.random() < epsilon:
@@ -53,14 +53,15 @@ def train_cotop():
             next_state, reward, done, _ = env.step(action)
             total_reward += reward
             
-            # --- جادوی ریاضی: استفاده از Advantage به جای پاداش خام ---
-            advantage = reward - state_value.item()
+            # --- جادوی نرم‌ال‌سازی پاداش برای جلوگیری از انفجار گرادیان ---
+            # مقادیر بزرگ بر 1000 تقسیم می‌شوند تا شبکه بتواند آن‌ها را هضم کند
+            scaled_reward = reward / 1000.0
+            advantage = scaled_reward - state_value.item()
             
             log_prob = torch.log(action_probs[action] + 1e-10)
             actor_loss = -log_prob * advantage
             
-            # خطای شبکه Critic (چقدر پیش‌بینی‌اش با واقعیت فاصله داشت)
-            reward_tensor = torch.tensor([reward], dtype=torch.float32)
+            reward_tensor = torch.tensor([scaled_reward], dtype=torch.float32)
             critic_loss = F.mse_loss(state_value.squeeze(), reward_tensor.squeeze())
             
             loss = actor_loss + critic_loss
@@ -68,16 +69,15 @@ def train_cotop():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            # ---------------------------------------------------------
+            # -------------------------------------------------------------
             
             state = next_state
             if done: break
             
-        print(f"✅ Final Train - Ep {episode+1}/{epochs} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
+        print(f"✅ Grand Train - Ep {episode+1}/{epochs} | Raw Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
         log_episode("cotop_train", episode + 1, total_reward)
         env.close()
         
-    # ذخیره با یک نام کاملاً جدید و اختصاصی
     torch.save(agent.state_dict(), "cotop_model_final.pth")
     print("💾 Ultimate brain saved as 'cotop_model_final.pth'!")
 

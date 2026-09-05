@@ -51,9 +51,9 @@ def evaluate_local():
         print(f"✅ Local Agent - Episode {episode + 1}/{MAX_EPISODES} | Total Reward: {episode_reward:.2f}")
         log_episode("local", episode + 1, episode_reward)
         
-        avg_makespan = sum(env.episode_makespans) / len(env.episode_makespans) if env.episode_makespans else 0
+        total_makespan = sum(env.episode_makespans) if env.episode_makespans else 0
         max_makespan = max(env.episode_makespans) if env.episode_makespans else 0
-        log_advanced_metrics("local", env.episode_energy, avg_makespan, max_makespan)
+        log_advanced_metrics("local", env.episode_energy, total_makespan, max_makespan)
         
         env.close()
         
