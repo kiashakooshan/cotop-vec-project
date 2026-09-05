@@ -24,7 +24,7 @@ def train_gat_gru():
     print("🧠 Starting Mobility Model (GAT+GRU) Training...")
     
     sumocfg = "../sumo/osm.sumocfg"
-    traci.start(["sumo", "-c", sumocfg, "--start", "--quit-on-end"])
+    traci.start(["sumo", "-c", sumocfg, "--start", "--quit-on-end", "--no-warnings"])
     
     # --- ساخت 40 ماشین در ثانیه صفر ---
     fleet_manager = FleetManager(num_vehicles=40)

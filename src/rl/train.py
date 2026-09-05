@@ -25,7 +25,7 @@ def train_cotop():
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
     agent = ActorCritic(8, 6)
-    optimizer = optim.Adam(agent.parameters(), lr=0.002)
+    optimizer = optim.Adam(agent.parameters(), lr=0.0002)
     
     epochs = 50 
     

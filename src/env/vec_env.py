@@ -27,7 +27,6 @@ class VECEnv:
         self.use_priority = use_priority
         self.use_collaboration = use_collaboration
         
-        # 1. لود کردن آنتن‌ها و ساخت سخت‌افزار ناهمگون (A7/A12)
         with open(rsus_json_path, 'r') as f:
             rsus_data = json.load(f)
             
@@ -39,9 +38,8 @@ class VECEnv:
         
         self.current_time = 0
         self.fleet_manager = FleetManager(num_vehicles=40)
-        self.schedulers = {} # تایمرهای تولید وظیفه برای هر ماشین
+        self.schedulers = {} 
         
-        # متغیرهای گزارش‌گیری
         self.episode_energy = 0.0
         self.episode_makespans = []
         self.mobility_predictions = {}
@@ -55,21 +53,19 @@ class VECEnv:
 
     def reset(self, render=False):
         if render:
-            traci.start(["sumo-gui", "-c", self.sumocfg])
+            traci.start(["sumo-gui", "-c", self.sumocfg, "--no-warnings"])
         else:
-            traci.start(["sumo", "-c", self.sumocfg, "--start", "--quit-on-end"])
+            traci.start(["sumo", "-c", self.sumocfg, "--start", "--quit-on-end", "--no-warnings"])
             
         self.current_time = 0
         self.fleet_manager.spawn_fixed_fleet()
         
-        # مقداردهی زمان‌بندها برای 40 ماشین
         self.schedulers = {f"car_{i}": VehicleTaskScheduler(f"car_{i}") for i in range(40)}
         
         self.episode_energy = 0.0
         self.episode_makespans = []
         self.mobility_predictions = {f"car_{i}": [] for i in range(40)}
         
-        # ریست کردن وضعیت پردازنده‌ها
         for node in self.rsu_nodes:
             for p in node.processors:
                 p.free_at = 0.0
@@ -87,22 +83,20 @@ class VECEnv:
         return self.rsu_nodes[nearest_idx]
 
     def _schedule_dag_on_rsu(self, dag, rsu_node):
-        """زمان‌بندی زیروظایف DAG روی پردازنده‌های فیزیکی RSU"""
         task_results = {}
         dag_energy = 0.0
         BASE_CAPACITY = 2.0
         
-        # پردازش وظایف بر اساس لایه‌ها تا قید والد-فرزندی رعایت شود
         sorted_tasks = sorted(dag["tasks"].values(), key=lambda x: x["layer"])
         
         for task in sorted_tasks:
             proc = rsu_node.pick_free_processor()
             parent_ready_time = dag["release_time"]
             
-            # قید وابستگی: وظیفه باید منتظر تمام والدینش بماند
             for p_id in task["parents"]:
-                p_finish = task_results[p_id]["finish_time"]
-                parent_ready_time = max(parent_ready_time, p_finish)
+                if p_id in task_results:
+                    p_finish = task_results[p_id]["finish_time"]
+                    parent_ready_time = max(parent_ready_time, p_finish)
                 
             start_time = max(proc.free_at, parent_ready_time)
             processing_time = task["phi"] / (BASE_CAPACITY * proc.speed_factor)
@@ -114,7 +108,6 @@ class VECEnv:
             
             task_results[task["id"]] = {"finish_time": finish_time}
             
-        # محاسبه Makespan کل DAG
         makespan = max([task_results[t]["finish_time"] for t in dag["exit_tasks"]]) - dag["release_time"]
         return makespan, dag_energy
 
@@ -123,7 +116,11 @@ class VECEnv:
         self.current_time += 1
         self.fleet_manager.keep_fleet_closed()
         
-        vehicle_ids = traci.vehicle.getIDList()
+        # --- جادوی فیلتر کردن: ما فقط ماشین‌های پروژه را می‌بینیم ---
+        raw_vehicle_ids = traci.vehicle.getIDList()
+        vehicle_ids = [v for v in raw_vehicle_ids if v.startswith("car_")]
+        # -------------------------------------------------------------
+        
         done = traci.simulation.getMinExpectedNumber() <= 0
         reward = 0
         
@@ -131,10 +128,9 @@ class VECEnv:
             active_vehicles = vehicle_ids[:40] 
             all_positions = [traci.vehicle.getPosition(v) for v in active_vehicles]
             
-            # --- گزارش‌گیری تحرک (ADE/FDE) ---
             if self.use_mobility_detector:
                 x_seq = torch.tensor(all_positions, dtype=torch.float32).unsqueeze(1)
-                edges = torch.empty((2, 0), dtype=torch.long) # ساده‌سازی گراف برای سرعت
+                edges = torch.empty((2, 0), dtype=torch.long) 
                 with torch.no_grad():
                     predicted_futures = self.mobility_model(x_seq, [edges], future_steps=1)
                 
@@ -142,39 +138,31 @@ class VECEnv:
                     pred_pos = (predicted_futures[idx][0][0].item(), predicted_futures[idx][0][1].item())
                     actual_pos = all_positions[idx]
                     self.mobility_predictions[v_id].append((pred_pos, actual_pos))
-            # -------------------------------
 
-            # انتخاب RSU توسط عامل RL برای ماشین اصلی
             selected_rsu_idx = action if action < len(self.rsu_nodes) else 0
             main_rsu_node = self.rsu_nodes[selected_rsu_idx]
             
             step_makespans = []
             step_energies = []
 
-            # تولید و پردازش گراف‌ها (DAG)
             for idx in range(len(active_vehicles)):
                 v_id = active_vehicles[idx]
                 pos = all_positions[idx]
                 scheduler = self.schedulers.get(v_id)
                 
-                # بررسی اینکه آیا زمان تولید DAG جدید برای این ماشین رسیده است؟
                 if scheduler and scheduler.should_generate(self.current_time):
                     new_dag = generate_task_dag(v_id, self.current_time)
                     scheduler.schedule_next(self.current_time)
                     
                     if idx == 0:
-                        # ماشین اصلی: اعمال اکشن شبکه RL
                         target_rsu = main_rsu_node
                     else:
-                        # ماشین‌های پس‌زمینه: نزدیک‌ترین RSU
                         target_rsu = self._get_nearest_rsu_node(pos)
                         
-                    # اجرای DAG روی سخت‌افزار
                     makespan, energy = self._schedule_dag_on_rsu(new_dag, target_rsu)
                     step_makespans.append(makespan)
                     step_energies.append(energy)
 
-            # محاسبه پاداش شبکه RL بر اساس Makespan و Energy
             if len(step_makespans) > 0:
                 avg_makespan = sum(step_makespans) / len(step_makespans)
                 avg_energy = sum(step_energies) / len(step_energies)
@@ -183,16 +171,17 @@ class VECEnv:
                 self.episode_makespans.extend(step_makespans)
                 
                 sigma_w = 0.6
-                reward = -(sigma_w * avg_makespan + (1 - sigma_w) * avg_energy)
+                reward = -(sigma_w * avg_makespan + (1 - sigma_w) * avg_energy) / 100.0
             else:
-                reward = 0  # اگر در این ثانیه DAG تولید نشد، پاداش صفر است
+                reward = 0  
                 
         next_state = self._get_state(vehicle_ids)
         return next_state, reward, done, []
 
     def _get_state(self, vehicle_ids=None):
         if vehicle_ids is None:
-            vehicle_ids = traci.vehicle.getIDList()
+            raw_vehicle_ids = traci.vehicle.getIDList()
+            vehicle_ids = [v for v in raw_vehicle_ids if v.startswith("car_")]
             
         state = [0.0, 0.0] 
         if len(vehicle_ids) > 0:
@@ -200,7 +189,6 @@ class VECEnv:
             pos = traci.vehicle.getPosition(v_id)
             state = [pos[0] / 2000.0, pos[1] / 1000.0]
             
-        # به جای صف تخت، میانگین زمان آزاد شدن پردازنده‌های هر RSU را به عامل می‌دهیم
         for node in self.rsu_nodes:
             avg_free_time = sum(p.free_at for p in node.processors) / len(node.processors)
             load = max(0, avg_free_time - self.current_time)
