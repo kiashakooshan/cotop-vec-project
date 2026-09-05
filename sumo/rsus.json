@@ -1,8 +1,8 @@
 [
-    {"id": "RSU1", "x": 500.0,  "y": 700.0, "range": 400, "capacity": 1.5},
-    {"id": "RSU2", "x": 1050.0, "y": 800.0, "range": 400, "capacity": 3.0},
-    {"id": "RSU3", "x": 1500.0, "y": 600.0, "range": 400, "capacity": 2.0},
-    {"id": "RSU4", "x": 1400.0, "y": 330.0, "range": 400, "capacity": 2.5},
-    {"id": "RSU5", "x": 1000.0, "y": 320.0, "range": 400, "capacity": 1.8},
-    {"id": "RSU6", "x": 650.0,  "y": 320.0, "range": 400, "capacity": 2.2}
+    {"id": "RSU1", "x": 500.0,  "y": 700.0, "range": 400, "capacity": 2.0, "cpu_type": "A12", "num_processors": 3, "speed_factor": 2.0, "power_draw": 2.5},
+    {"id": "RSU2", "x": 1050.0, "y": 800.0, "range": 400, "capacity": 2.0, "cpu_type": "A7",  "num_processors": 3, "speed_factor": 1.0, "power_draw": 1.0},
+    {"id": "RSU3", "x": 1500.0, "y": 600.0, "range": 400, "capacity": 2.0, "cpu_type": "A12", "num_processors": 3, "speed_factor": 2.0, "power_draw": 2.5},
+    {"id": "RSU4", "x": 1400.0, "y": 330.0, "range": 400, "capacity": 2.0, "cpu_type": "A7",  "num_processors": 3, "speed_factor": 1.0, "power_draw": 1.0},
+    {"id": "RSU5", "x": 1000.0, "y": 320.0, "range": 400, "capacity": 2.0, "cpu_type": "A12", "num_processors": 3, "speed_factor": 2.0, "power_draw": 2.5},
+    {"id": "RSU6", "x": 650.0,  "y": 320.0, "range": 400, "capacity": 2.0, "cpu_type": "A7",  "num_processors": 3, "speed_factor": 1.0, "power_draw": 1.0}
 ]

@@ -8,6 +8,7 @@ import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.task_generator import generate_random_task
+from env.fleet_manager import FleetManager  # --- اضافه شدن مدیر ناوگان ---
 from models import models
 from models.models import sort_tasks_by_priority
 from mobility.gat_gru import MobilityDetector
@@ -32,13 +33,14 @@ class VECEnv:
         self.queues = {r["id"]: [] for r in self.rsus}
         self.current_time = 0
         
+        # --- مقداردهی اولیه مدیر ناوگان با 40 ماشین ---
+        self.fleet_manager = FleetManager(num_vehicles=40)
+        
         if self.use_mobility_detector:
             self.mobility_model = MobilityDetector(in_dim=2, hidden=32, gru_hidden=64)
-            # --- تغییر جدید: لود کردن وزن‌های آموزش‌دیده ---
             model_path = os.path.join(os.path.dirname(__file__), '../mobility/mobility_trained.pth')
             if os.path.exists(model_path):
                 self.mobility_model.load_state_dict(torch.load(model_path))
-            # ---------------------------------------------
             self.mobility_model.eval()
             
     def reset(self, render=False):
@@ -61,6 +63,10 @@ class VECEnv:
             
         self.current_time = 0
         self.queues = {r["id"]: [] for r in self.rsus}
+        
+        # --- تولید 40 ماشین در ثانیه صفر ---
+        self.fleet_manager.spawn_fixed_fleet()
+        
         return self._get_state()
         
     def _build_graph(self, vehicle_ids, max_distance=100.0):
@@ -88,12 +94,15 @@ class VECEnv:
         traci.simulationStep()
         self.current_time += 1
         
+        # --- بررسی و تمدید مسیر ماشین‌ها برای جلوگیری از خروج ---
+        self.fleet_manager.keep_fleet_closed()
+        
         vehicle_ids = traci.vehicle.getIDList()
         done = traci.simulation.getMinExpectedNumber() <= 0
         reward = 0
         
         if len(vehicle_ids) > 0:
-            active_vehicles = vehicle_ids[:20] # حداکثر 20 ماشین فعال
+            active_vehicles = vehicle_ids[:40] # محدودیت را به 40 رساندیم تا همه ماشین‌ها را در بر بگیرد
             
             all_positions = [traci.vehicle.getPosition(v) for v in active_vehicles]
             edge_index = self._build_graph(active_vehicles)
@@ -108,13 +117,12 @@ class VECEnv:
                 selected_rsu_idx = 0 
             current_rsu = self.rsus[selected_rsu_idx]
 
-            # --- اصلاح علت 3.3 (تاثیرگذاری اکشن روی کل سیستم) ---
             for idx in range(len(active_vehicles)):
                 v_id = active_vehicles[idx]
                 pos = all_positions[idx]
                 task = generate_random_task(v_id, self.current_time)
                 
-                if idx == 0: # ماشین اصلی
+                if idx == 0: 
                     predicted_t_stay = 15.0
                     if self.use_mobility_detector:
                         future_positions = predicted_futures[0]
@@ -124,17 +132,14 @@ class VECEnv:
                                 break
                     task["T_stay"] = predicted_t_stay
                     self.queues[current_rsu["id"]].append(task)
-                else: # ماشین‌های پس‌زمینه
+                else: 
                     task["T_stay"] = 10.0
-                    # حالا اکشن شبکه عصبی، ماشین‌های اطراف را هم به سمت RSU انتخاب شده هدایت می‌کند!
                     if math.dist(pos, (current_rsu["x"], current_rsu["y"])) < 500.0:
                         self.queues[current_rsu["id"]].append(task)
                     else:
                         nearest_rsu = self._get_nearest_rsu(pos)
                         self.queues[nearest_rsu["id"]].append(task)
-            # ----------------------------------------------------
 
-            # --- اصلاح علت 3.2 (محاسبه پاداش از کل سیستم) ---
             step_delays = []
             step_energies = []
             deadline_misses = 0
@@ -144,12 +149,11 @@ class VECEnv:
                 if self.use_priority:
                     queue = sort_tasks_by_priority(queue)
                 
-                # فرض می‌کنیم هر RSU در هر ثانیه می‌تواند حداکثر 3 وظیفه را استخراج کند
                 processed, remaining = queue[:3], queue[3:]
                 self.queues[rsu["id"]] = remaining
                 
                 for t in processed:
-                    distance = 50.0 # فاصله حدودی برای محاسبات ساده‌تر
+                    distance = 50.0 
                     rate = models.v2r_rate(B=10, P_v=0.5, K=1e-3, omega=1e-9, distance=distance, sigma=2)
                     t_up = models.upload_delay(t["rho"], rate)
                     
@@ -172,11 +176,9 @@ class VECEnv:
                 avg_delay = sum(step_delays) / max(1, len(step_delays))
                 avg_energy = sum(step_energies) / max(1, len(step_energies))
                 sigma_w = 0.5
-                # جریمه سنگین برای از دست دادن مهلت مجاز
                 reward = -(sigma_w * avg_delay + (1 - sigma_w) * avg_energy) - (deadline_misses * 20.0) 
             else:
                 reward = 0
-            # ----------------------------------------------------
                 
         next_state = self._get_state(vehicle_ids)
         return next_state, reward, done, []
