@@ -18,14 +18,15 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-def log_advanced_metrics(method_name, energy, avg_makespan, max_makespan):
+def log_advanced_metrics(method_name, energy, total_makespan, max_makespan):
     file_path = f"../results/{method_name}_metrics.csv"
     write_header = not os.path.exists(file_path)
     with open(file_path, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(["energy", "avg_makespan", "max_makespan"])
-        writer.writerow([energy, avg_makespan, max_makespan])
+            # گام 10: اصلاح نام ستون
+            writer.writerow(["energy", "total_makespan", "max_makespan"])
+        writer.writerow([energy, total_makespan, max_makespan])
 
 def evaluate_local():
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json", use_collaboration=False)

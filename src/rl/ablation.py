@@ -49,7 +49,7 @@ def run_ablation_studies():
     if os.path.exists("../results/ablation_log.csv"):
         os.remove("../results/ablation_log.csv")
         
-    agent = ActorCritic(8, 6) # این خط اصلاح شد
+    agent = ActorCritic(11, 6) # این خط اصلاح شد
     if os.path.exists("cotop_model_final.pth"): # نام مدل نهایی هم آپدیت شد
         agent.load_state_dict(torch.load("cotop_model_final.pth"))
     agent.eval()

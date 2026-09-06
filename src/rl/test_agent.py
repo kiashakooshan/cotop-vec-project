@@ -14,7 +14,7 @@ def demonstrate_model():
     env = VECEnv(config_file, rsus_file)
     
     # اصلاح ۱: فضای حالت به ۸ تغییر یافت (۲ ویژگی مکانی + ۶ وضعیت لود سرورها)
-    state_dim = 8 
+    state_dim = 11
     action_dim = 6 
     
     agent = ActorCritic(state_dim, action_dim)

@@ -29,8 +29,9 @@ def v2r_rate(B, P_v, K, omega, distance, sigma):
     return B * math.log2(1 + (P_v * K) / (omega * distance**sigma))
 
 def r2r_rate(distance=500.0):
-    """نرخ انتقال بین دو RSU برای پاس‌کاری وظایف (ارتباطات فیبر/بک‌هاول)"""
-    return 100.0  # فرض یک نرخ ثابت و بالا (مثلاً 100 Mbps) برای سادگی
+    B_R2R, P_R, K, omega, sigma = 50, 1.0, 1e-3, 1e-9, 2
+    # متغیر distance حالا واقعاً در مخرج کسر برای محاسبه افت سیگنال استفاده می‌شود
+    return B_R2R * math.log2(1 + (P_R * K) / (omega * max(distance, 1.0)**sigma))
 
 def upload_delay(task_size, rate):
     return task_size / rate

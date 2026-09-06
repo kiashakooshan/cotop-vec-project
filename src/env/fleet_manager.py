@@ -37,6 +37,9 @@ class FleetManager:
                     
         if spawned < self.num_vehicles:
             print(f"⚠️ Warning: Could only spawn {spawned}/{self.num_vehicles} cars.")
+            
+        # گام 11: تضمین اینکه دقیقاً 40 ماشین وارد شبیه‌سازی شوند
+        assert spawned == self.num_vehicles, f"CRITICAL ERROR: Failed to spawn exact number of vehicles ({self.num_vehicles})."
 
     def keep_fleet_closed(self):
         """ایده جدید: تغییر مسیر به مقاصد دور، بدون هیچ‌گونه Respawn"""

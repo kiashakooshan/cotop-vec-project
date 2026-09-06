@@ -42,7 +42,8 @@ def plot_energy_and_makespan():
         if os.path.exists(path):
             df = pd.read_csv(path)
             energy_data[name] = df["energy"].mean()
-            makespan_total[name] = df["avg_makespan"].mean() # در فایل‌های ارزیاب ما اسم این ستون را نگه داشتیم اما مقدارش Total است
+            # گام 10: خواندن ستون اصلاح‌شده
+            makespan_total[name] = df["total_makespan"].mean() 
             
     if energy_data:
         print("\n--- Total Energy Consumption (Joules) ---")
@@ -102,7 +103,6 @@ def generate_mobility_report():
             
     report_df = pd.DataFrame(report)
     
-    # چاپ مستقیم و زیبای دیتا فریم در ترمینال برای مشاهده تو
     print(report_df.to_string(index=False))
     print("="*50)
 
