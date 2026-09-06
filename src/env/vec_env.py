@@ -88,9 +88,8 @@ class VECEnv:
         transmission_energy = 0.0
         BASE_CAPACITY = 2.0
         
-        # توان مصرفی فرضی برای انتقال دیتا (طبق مدل مقاله)
-        E_V2R = 0.5 # ژول بر مگابایت (ارتباط ماشین با آنتن)
-        E_R2R = 0.2 # ژول بر مگابایت (ارتباط بین دو آنتن)
+        E_V2R = 0.5 
+        E_R2R = 0.2 
         
         sorted_tasks = sorted(dag["tasks"].values(), key=lambda x: x["layer"])
         
@@ -107,15 +106,12 @@ class VECEnv:
             processing_time = task["phi"] / (BASE_CAPACITY * proc.speed_factor)
             finish_time = start_time + processing_time
             
-            # ۱. محاسبه دقیق انرژی پردازش
             comp_e = processing_time * proc.power_draw
             computation_energy += comp_e
             
-            # ۲. محاسبه دقیق انرژی انتقال (V2R) برای آپلود وظیفه
             trans_e = task["rho"] * E_V2R
             transmission_energy += trans_e
             
-            # ۳. محاسبه انرژی همکاری R2R (اگر تسک به آنتن دیگری پاس داده شده باشد)
             if not is_local:
                 transmission_energy += (task["rho"] * E_R2R)
                 
@@ -148,12 +144,10 @@ class VECEnv:
                 with torch.no_grad():
                     predicted_futures = self.mobility_model(x_seq, [edges], future_steps=1)
                 
-                for idx, actual_v_id in enumerate(active_vehicles):
-                    # --- جادوی تبدیل اسم ---
-                    base_v_id = "_".join(actual_v_id.split('_')[:2]) 
+                for idx, v_id in enumerate(active_vehicles):
                     pred_pos = (predicted_futures[idx][0][0].item(), predicted_futures[idx][0][1].item())
                     actual_pos = all_positions[idx]
-                    self.mobility_predictions[base_v_id].append((pred_pos, actual_pos))
+                    self.mobility_predictions[v_id].append((pred_pos, actual_pos))
 
             selected_rsu_idx = action if action < len(self.rsu_nodes) else 0
             main_rsu_node = self.rsu_nodes[selected_rsu_idx]
@@ -162,15 +156,13 @@ class VECEnv:
             step_energies = []
 
             for idx in range(len(active_vehicles)):
-                actual_v_id = active_vehicles[idx]
-                # استفاده از نام پایه برای تمام کارهای داخلی پایتون
-                base_v_id = "_".join(actual_v_id.split('_')[:2])
+                v_id = active_vehicles[idx]
                 pos = all_positions[idx]
                 
-                scheduler = self.schedulers.get(base_v_id)
+                scheduler = self.schedulers.get(v_id)
                 
                 if scheduler and scheduler.should_generate(self.current_time):
-                    new_dag = generate_task_dag(base_v_id, self.current_time)
+                    new_dag = generate_task_dag(v_id, self.current_time)
                     scheduler.schedule_next(self.current_time)
                     
                     if idx == 0:
