@@ -5,7 +5,6 @@ import math
 import traci
 import torch
 import numpy as np
-import csv
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.task_generator import VehicleTaskScheduler, generate_task_dag
@@ -44,6 +43,9 @@ class VECEnv:
         self.episode_makespans = []
         self.mobility_predictions = {}
         
+        # --- ویژگی جدید: ذخیره مشخصات وظایف (DAG) برای شبکه عصبی ---
+        self.last_dag_features = {}
+        
         if self.use_mobility_detector:
             self.mobility_model = MobilityDetector(in_dim=2, hidden=32, gru_hidden=64)
             model_path = os.path.join(os.path.dirname(__file__), '../mobility/mobility_trained.pth')
@@ -65,6 +67,9 @@ class VECEnv:
         self.episode_energy = 0.0
         self.episode_makespans = []
         self.mobility_predictions = {f"car_{i}": [] for i in range(40)}
+        
+        # مقداردهی اولیه ویژگی وظایف برای 40 ماشین (حجم داده، حجم پردازش، ددلاین)
+        self.last_dag_features = {f"car_{i}": [0.0, 0.0, 0.0] for i in range(40)}
         
         for node in self.rsu_nodes:
             for p in node.processors:
@@ -163,6 +168,17 @@ class VECEnv:
                 
                 if scheduler and scheduler.should_generate(self.current_time):
                     new_dag = generate_task_dag(v_id, self.current_time)
+                    
+                    # --- جادوی بینایی وظایف ---
+                    # استخراج حجم داده (rho)، حجم پردازش (phi) و ددلاین (d) از گراف
+                    total_rho = sum(t["rho"] for t in new_dag["tasks"].values())
+                    total_phi = sum(t["phi"] for t in new_dag["tasks"].values())
+                    max_d = max(t["d"] for t in new_dag["tasks"].values())
+                    
+                    # نرم‌ال‌سازی و ذخیره در حافظه محیط
+                    self.last_dag_features[v_id] = [total_rho / 50.0, total_phi / 50.0, max_d / 20.0]
+                    # ---------------------------
+                    
                     scheduler.schedule_next(self.current_time)
                     
                     if idx == 0:
@@ -195,16 +211,26 @@ class VECEnv:
             vehicle_ids = [v for v in raw_vehicle_ids if v.startswith("car_")]
             
         state = [0.0, 0.0] 
+        task_state = [0.0, 0.0, 0.0] # ویژگی وظیفه (rho, phi, deadline)
+
         if len(vehicle_ids) > 0:
             actual_v_id = vehicle_ids[0]
             pos = traci.vehicle.getPosition(actual_v_id)
             state = [pos[0] / 2000.0, pos[1] / 1000.0]
+            
+            # استخراج ویژگی‌های وظیفه‌ی ماشینی که قرار است برایش تصمیم بگیریم
+            if actual_v_id in self.last_dag_features:
+                task_state = self.last_dag_features[actual_v_id]
+                
+        # اضافه کردن مشخصات وظیفه به State شبکه عصبی
+        state.extend(task_state)
             
         for node in self.rsu_nodes:
             avg_free_time = sum(p.free_at for p in node.processors) / len(node.processors)
             load = max(0, avg_free_time - self.current_time)
             state.append(load / 50.0)
             
+        # حالا خروجی یک آرایه با 11 عضو است
         return np.array(state, dtype=np.float32)
 
     def close(self):

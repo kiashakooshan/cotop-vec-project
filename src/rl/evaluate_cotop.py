@@ -20,7 +20,7 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-# --- توابع جدید برای ثبت گزارش‌های انرژی، Makespan و دقت GAT-GRU ---
+# --- توابع ثبت گزارش‌های انرژی، Makespan و دقت GAT-GRU ---
 def log_advanced_metrics(method_name, energy, avg_makespan, max_makespan):
     file_path = f"../results/{method_name}_metrics.csv"
     write_header = not os.path.exists(file_path)
@@ -41,11 +41,12 @@ def log_mobility_predictions(env):
 # -----------------------------------------------------------------
 
 def evaluate_trained_model():
-    print(f"🚀 Evaluating FULLY TRAINED CoTOP ({MAX_EPISODES} Episodes)...")
+    print(f"🚀 Evaluating FULLY TRAINED 11D CoTOP ({MAX_EPISODES} Episodes)...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
-    agent = ActorCritic(8, 6)
-    # اصلاح نام فایل به مدل نهایی
+    # --- تغییر طلایی: لود کردن مدل با ورودی 11 بُعدی ---
+    agent = ActorCritic(11, 6)
+    
     if os.path.exists("cotop_model_final.pth"):
         agent.load_state_dict(torch.load("cotop_model_final.pth"))
     else:

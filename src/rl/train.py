@@ -21,10 +21,11 @@ def log_episode(method_name, episode, total_reward):
         writer.writerow([episode, total_reward])
 
 def train_cotop():
-    print("🚀 Starting The Grand CoTOP Training (500 Episodes)...")
+    print("🚀 Starting The Grand CoTOP Training (500 Episodes) with 11D Vision...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
-    agent = ActorCritic(8, 6)
+    # --- تغییر طلایی: ارتقا از 8 بُعد به 11 بُعد ---
+    agent = ActorCritic(11, 6)
     
     # نرخ یادگیری دقیقاً مطابق مقاله تنظیم شد
     optimizer = optim.Adam(agent.parameters(), lr=0.0002)
@@ -54,7 +55,6 @@ def train_cotop():
             total_reward += reward
             
             # --- جادوی نرم‌ال‌سازی پاداش برای جلوگیری از انفجار گرادیان ---
-            # مقادیر بزرگ بر 1000 تقسیم می‌شوند تا شبکه بتواند آن‌ها را هضم کند
             scaled_reward = reward / 1000.0
             advantage = scaled_reward - state_value.item()
             
@@ -69,7 +69,6 @@ def train_cotop():
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            # -------------------------------------------------------------
             
             state = next_state
             if done: break
@@ -79,7 +78,7 @@ def train_cotop():
         env.close()
         
     torch.save(agent.state_dict(), "cotop_model_final.pth")
-    print("💾 Ultimate brain saved as 'cotop_model_final.pth'!")
+    print("💾 Ultimate 11D brain saved as 'cotop_model_final.pth'!")
 
 if __name__ == "__main__":
     train_cotop()
