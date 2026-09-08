@@ -21,16 +21,12 @@ def log_episode(method_name, episode, total_reward):
         writer.writerow([episode, total_reward])
 
 def train_cotop():
-    print("🚀 Starting The Grand CoTOP Training (500 Episodes) with 11D Vision...")
+    epochs = 200 
+    print(f"🚀 Starting The Grand CoTOP Training ({epochs} Episodes) with 11D Vision...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
-    # --- تغییر طلایی: ارتقا از 8 بُعد به 11 بُعد ---
     agent = ActorCritic(11, 6)
-    
-    # نرخ یادگیری دقیقاً مطابق مقاله تنظیم شد
     optimizer = optim.Adam(agent.parameters(), lr=0.0002)
-    
-    epochs = 500 
     
     if os.path.exists("../results/cotop_train_log.csv"):
         os.remove("../results/cotop_train_log.csv")
@@ -38,8 +34,6 @@ def train_cotop():
     for episode in range(epochs):
         state = env.reset(render=False)
         total_reward = 0
-        
-        # کاهش بسیار ملایم‌ترِ اکتشاف در طول 400 اپیزود اول
         epsilon = max(0.01, 0.5 - (episode / (epochs * 0.8)))
         
         for step in range(300):
@@ -54,7 +48,6 @@ def train_cotop():
             next_state, reward, done, _ = env.step(action)
             total_reward += reward
             
-            # --- جادوی نرم‌ال‌سازی پاداش برای جلوگیری از انفجار گرادیان ---
             scaled_reward = reward / 1000.0
             advantage = scaled_reward - state_value.item()
             

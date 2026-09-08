@@ -42,7 +42,7 @@ def plot_energy_and_makespan():
         if os.path.exists(path):
             df = pd.read_csv(path)
             energy_data[name] = df["energy"].mean()
-            # گام 10: خواندن ستون اصلاح‌شده
+            # این خط اصلاح شد تا ستون جدید را بخواند
             makespan_total[name] = df["total_makespan"].mean() 
             
     if energy_data:

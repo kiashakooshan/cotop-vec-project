@@ -5,14 +5,13 @@ import math
 import traci
 import torch
 import numpy as np
-from mobility.train_mobility import build_graph
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.task_generator import VehicleTaskScheduler, generate_task_dag
 from env.fleet_manager import FleetManager
-from models.models import RSU_Node
-from mobility.gat_gru import MobilityDetector
 from models.models import RSU_Node, sort_tasks_by_priority, v2r_rate, r2r_rate
+from mobility.gat_gru import MobilityDetector
+from mobility.train_mobility import build_graph
 
 if 'SUMO_HOME' in os.environ:
     tools = os.path.join(os.environ['SUMO_HOME'], 'tools')
@@ -45,7 +44,6 @@ class VECEnv:
         self.episode_makespans = []
         self.mobility_predictions = {}
         
-        # --- ویژگی جدید: ذخیره مشخصات وظایف (DAG) برای شبکه عصبی ---
         self.last_dag_features = {}
         self.pending_predictions = {}
         
@@ -71,8 +69,8 @@ class VECEnv:
         self.episode_makespans = []
         self.mobility_predictions = {f"car_{i}": [] for i in range(40)}
         
-        # مقداردهی اولیه ویژگی وظایف برای 40 ماشین (حجم داده، حجم پردازش، ددلاین)
         self.last_dag_features = {f"car_{i}": [0.0, 0.0, 0.0] for i in range(40)}
+        self.pending_predictions = {}
         
         for node in self.rsu_nodes:
             for p in node.processors:
@@ -91,7 +89,6 @@ class VECEnv:
         return self.rsu_nodes[nearest_idx]
 
     def _get_next_rsu_on_route(self, veh_id, current_rsu):
-        # انتخاب ساده‌ترین RSU بعدی از لیست همسایگان برای Case 2
         current_idx = next(i for i, rsu in enumerate(self.rsu_nodes) if rsu.id == current_rsu.id)
         next_idx = (current_idx + 1) % len(self.rsu_nodes)
         return self.rsu_nodes[next_idx]
@@ -103,12 +100,10 @@ class VECEnv:
         E_V2R = 0.5
         E_R2R = 0.2
         
-        # استخراج مختصات RSU برای محاسبه فاصله
         rsu_data = next(r for r in self.rsus if r["id"] == primary_rsu.id)
         rsu_pos = (rsu_data["x"], rsu_data["y"])
         vehicle_pos = traci.vehicle.getPosition(dag["veh_id"])
         
-        # دسته‌بندی وظایف بر اساس لایه (قید توپولوژیک)
         tasks_by_layer = {}
         for t in dag["tasks"].values():
             tasks_by_layer.setdefault(t["layer"], []).append(t)
@@ -116,7 +111,6 @@ class VECEnv:
         sorted_tasks = []
         for layer_idx in sorted(tasks_by_layer.keys()):
             layer_tasks = tasks_by_layer[layer_idx]
-            # رفع باگ 3.4: اولویت‌بندی واقعی درون هر لایه اعمال می‌شود
             if self.use_priority:
                 layer_tasks = sort_tasks_by_priority(layer_tasks)
             sorted_tasks.extend(layer_tasks)
@@ -129,18 +123,15 @@ class VECEnv:
                 if p_id in task_results:
                     parent_ready_time = max(parent_ready_time, task_results[p_id]["finish_time"])
             
-            # رفع باگ 3.6: محاسبه نرخ واقعی V2R بر اساس فاصله فیزیکی
             distance = math.dist(vehicle_pos, rsu_pos)
             rate = v2r_rate(B=10, P_v=0.5, K=1e-3, omega=1e-9, distance=distance, sigma=2)
             t_up = task["rho"] / rate
             trans_e = t_up * E_V2R
             total_energy += trans_e
             
-            # رفع باگ 3.7: زمان آپلود (t_up) به محاسبه شروع اضافه شد
             start_time = max(proc.free_at, parent_ready_time) + t_up
             full_processing_time = task["phi"] / (BASE_CAPACITY * proc.speed_factor)
             
-            # رفع باگ 3.5: پیاده‌سازی Case 2 (تقسیم وظیفه بین دو RSU در صورت خروج خودرو)
             if use_collaboration and (start_time + full_processing_time - dag["release_time"]) > predicted_t_stay:
                 time_available = max(0.0, predicted_t_stay - (start_time - dag["release_time"]))
                 phi_done_locally = time_available * BASE_CAPACITY * proc.speed_factor
@@ -150,7 +141,6 @@ class VECEnv:
                 next_proc = next_rsu.pick_free_processor()
                 next_rsu_data = next(r for r in self.rsus if r["id"] == next_rsu.id)
                 
-                # محاسبه انتقال R2R
                 r2r_distance = math.dist(rsu_pos, (next_rsu_data["x"], next_rsu_data["y"]))
                 rate_r2r = r2r_rate(distance=r2r_distance)
                 t2 = task["rho"] / rate_r2r 
@@ -161,7 +151,6 @@ class VECEnv:
                 
                 total_energy += (time_available * proc.power_draw) + (t3 * next_proc.power_draw) + (task["rho"] * E_R2R)
             else:
-                # Case 1: پردازش کامل روی یک RSU
                 finish_time = start_time + full_processing_time
                 proc.free_at = finish_time
                 total_energy += full_processing_time * proc.power_draw
@@ -186,19 +175,16 @@ class VECEnv:
             active_vehicles = vehicle_ids[:40] 
             all_positions = [traci.vehicle.getPosition(v) for v in active_vehicles]
             
-            # استخراج دیکشنری موقعیت‌ها برای ساخت گراف و مقایسه
             pos_dict = {v_id: pos for v_id, pos in zip(active_vehicles, all_positions)}
             
             if self.use_mobility_detector:
                 x_seq = torch.tensor(all_positions, dtype=torch.float32).unsqueeze(1)
                 
-                # رفع باگ ۳.۱: استفاده از گراف واقعی به جای تنسور خالی
                 edges = build_graph(active_vehicles, pos_dict, max_distance=100.0) 
                 
                 with torch.no_grad():
                     predicted_futures = self.mobility_model(x_seq, [edges], future_steps=1)
                 
-                # رفع باگ ۳.۲: هم‌ترازی زمانی (مقایسه پیش‌بینی گام قبل با واقعیت الان)
                 for v_id in active_vehicles:
                     if v_id in self.pending_predictions:
                         predicted_pos = self.pending_predictions[v_id]
@@ -206,7 +192,6 @@ class VECEnv:
                         if actual_pos_now is not None:
                             self.mobility_predictions[v_id].append((predicted_pos, actual_pos_now))
                 
-                # ذخیره پیش‌بینی‌های جدید برای مقایسه در گام بعدی
                 for idx, v_id in enumerate(active_vehicles):
                     pred_pos = (predicted_futures[idx][0][0].item(), predicted_futures[idx][0][1].item())
                     self.pending_predictions[v_id] = pred_pos
@@ -217,7 +202,6 @@ class VECEnv:
             step_makespans = []
             step_energies = []
 
-            # رفع باگ ۳.۳: چرخاندن ماشینِ تحت کنترل بین همه ۴۰ ماشین
             controlled_idx = self.current_time % len(active_vehicles)
 
             for idx in range(len(active_vehicles)):
@@ -229,23 +213,19 @@ class VECEnv:
                 if scheduler and scheduler.should_generate(self.current_time):
                     new_dag = generate_task_dag(v_id, self.current_time)
                     
-                    # --- جادوی بینایی وظایف ---
                     total_rho = sum(t["rho"] for t in new_dag["tasks"].values())
                     total_phi = sum(t["phi"] for t in new_dag["tasks"].values())
                     max_d = max(t["d"] for t in new_dag["tasks"].values())
                     
                     self.last_dag_features[v_id] = [total_rho / 50.0, total_phi / 50.0, max_d / 20.0]
-                    # ---------------------------
                     
                     scheduler.schedule_next(self.current_time)
                     
-                    # اِعمال اکشن شبکه عصبی برای ماشینی که نوبتش است
                     if idx == controlled_idx:
                         target_rsu = main_rsu_node
                     else:
                         target_rsu = self._get_nearest_rsu_node(pos)
                         
-                    # محاسبه زمان ماندگاری تخمینی برای RSU انتخابی (با فرض شعاع 400 متر و سرعت میانگین 15m/s)
                     target_rsu_data = next(r for r in self.rsus if r["id"] == target_rsu.id)
                     dist_to_rsu = math.dist(pos, (target_rsu_data["x"], target_rsu_data["y"]))
                     predicted_t_stay = max(0.1, (400.0 - dist_to_rsu) / 15.0)
@@ -274,6 +254,31 @@ class VECEnv:
                 
         next_state = self._get_state(vehicle_ids)
         return next_state, reward, done, []
-    
+
+    def _get_state(self, vehicle_ids=None):
+        if vehicle_ids is None:
+            raw_vehicle_ids = traci.vehicle.getIDList()
+            vehicle_ids = [v for v in raw_vehicle_ids if v.startswith("car_")]
+            
+        state = [0.0, 0.0] 
+        task_state = [0.0, 0.0, 0.0] 
+
+        if len(vehicle_ids) > 0:
+            actual_v_id = vehicle_ids[0]
+            pos = traci.vehicle.getPosition(actual_v_id)
+            state = [pos[0] / 2000.0, pos[1] / 1000.0]
+            
+            if actual_v_id in self.last_dag_features:
+                task_state = self.last_dag_features[actual_v_id]
+                
+        state.extend(task_state)
+            
+        for node in self.rsu_nodes:
+            avg_free_time = sum(p.free_at for p in node.processors) / len(node.processors)
+            load = max(0, avg_free_time - self.current_time)
+            state.append(load / 50.0)
+            
+        return np.array(state, dtype=np.float32)
+
     def close(self):
         traci.close()

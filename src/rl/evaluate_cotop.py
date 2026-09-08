@@ -20,7 +20,6 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-# --- توابع ثبت گزارش‌های انرژی، Makespan و دقت GAT-GRU ---
 def log_advanced_metrics(method_name, energy, avg_makespan, max_makespan):
     file_path = f"../results/{method_name}_metrics.csv"
     write_header = not os.path.exists(file_path)
@@ -38,13 +37,11 @@ def log_mobility_predictions(env):
         for veh_id, pairs in env.mobility_predictions.items():
             for pred, actual in pairs:
                 writer.writerow([veh_id, pred[0], pred[1], actual[0], actual[1]])
-# -----------------------------------------------------------------
 
 def evaluate_trained_model():
     print(f"🚀 Evaluating FULLY TRAINED 11D CoTOP ({MAX_EPISODES} Episodes)...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     
-    # --- تغییر طلایی: لود کردن مدل با ورودی 11 بُعدی ---
     agent = ActorCritic(11, 6)
     
     if os.path.exists("cotop_model_final.pth"):
@@ -76,12 +73,10 @@ def evaluate_trained_model():
         print(f"✅ CoTOP (Eval) - Episode {episode+1} | Reward: {episode_reward:.2f}")
         log_episode("cotop", episode + 1, episode_reward)
         
-        # استخراج و ثبت متریک‌های پیشرفته برای این اپیزود
         total_makespan = sum(env.episode_makespans) if env.episode_makespans else 0
         max_makespan = max(env.episode_makespans) if env.episode_makespans else 0
         log_advanced_metrics("cotop", env.episode_energy, total_makespan, max_makespan)
         
-        # در اپیزود آخر، خطای مسیر را برای گزارش GAT-GRU ذخیره کن
         if episode == MAX_EPISODES - 1:
             log_mobility_predictions(env)
             
