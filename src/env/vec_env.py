@@ -93,6 +93,27 @@ class VECEnv:
         next_idx = (current_idx + 1) % len(self.rsu_nodes)
         return self.rsu_nodes[next_idx]
 
+    def _estimate_t_stay(self, current_pos, predicted_pos, rsu_pos, rsu_range):
+        """Estimate dwell time using the REAL mobility-model prediction (paper's 
+    t1)."""
+        cx, cy = current_pos
+        px, py = predicted_pos
+        rx, ry = rsu_pos
+        dx_to_rsu, dy_to_rsu = cx - rx, cy - ry
+        dist_to_center = math.hypot(dx_to_rsu, dy_to_rsu)
+        if dist_to_center < 1e-6:
+            return 50.0  # vehicle is exactly at the RSU; treat as long dwell time
+        # unit vector pointing AWAY from the RSU
+        away_x, away_y = dx_to_rsu / dist_to_center, dy_to_rsu / dist_to_center
+        # velocity implied by the model's one-step-ahead prediction
+        vx, vy = px - cx, py - cy
+        # how fast the vehicle is moving away from the RSU )radial speed(
+        radial_speed = vx * away_x + vy * away_y
+        remaining_dist = max(0.0, rsu_range - dist_to_center)
+        if radial_speed <= 0.01:
+            return 50.0  # not moving away meaningfully -> effectively staying
+        return remaining_dist / radial_speed
+
     def _schedule_dag_on_rsu(self, dag, primary_rsu, predicted_t_stay, use_collaboration=True):
         task_results = {}
         total_energy = 0.0
@@ -228,7 +249,17 @@ class VECEnv:
                         
                     target_rsu_data = next(r for r in self.rsus if r["id"] == target_rsu.id)
                     dist_to_rsu = math.dist(pos, (target_rsu_data["x"], target_rsu_data["y"]))
-                    predicted_t_stay = max(0.1, (400.0 - dist_to_rsu) / 15.0)
+                    if self.use_mobility_detector and v_id in self.pending_predictions:
+                        predicted_pos = self.pending_predictions[v_id]
+                        predicted_t_stay = self._estimate_t_stay(
+                            current_pos=pos,
+                            predicted_pos=predicted_pos,
+                            rsu_pos=(target_rsu_data["x"], target_rsu_data["y"]),
+                            rsu_range=target_rsu_data.get("range", 400.0)
+                        )
+                    else:
+                        # fallback heuristic — used when mobility detector is OFF (ablation "w/o_MD")
+                        predicted_t_stay = max(0.1, (target_rsu_data.get("range", 400.0) - dist_to_rsu) / 15.0)
 
                     makespan, energy = self._schedule_dag_on_rsu(
                         new_dag, 
