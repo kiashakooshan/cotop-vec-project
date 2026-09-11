@@ -20,14 +20,14 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-def log_advanced_metrics(method_name, energy, total_makespan, max_makespan):
+def log_advanced_metrics(method_name, energy, controlled_energy, total_makespan, max_makespan):
     file_path = f"../results/{method_name}_metrics.csv"
     write_header = not os.path.exists(file_path)
     with open(file_path, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(["energy", "total_makespan", "max_makespan"])
-        writer.writerow([energy, total_makespan, max_makespan])
+            writer.writerow(["energy", "controlled_energy", "total_makespan", "max_makespan"])
+        writer.writerow([energy, controlled_energy, total_makespan, max_makespan])
 
 def log_mobility_predictions(env):
     mob_path = "../results/mobility_predictions.csv"
@@ -75,7 +75,7 @@ def evaluate_trained_model():
         
         total_makespan = sum(env.episode_makespans) if env.episode_makespans else 0
         max_makespan = max(env.episode_makespans) if env.episode_makespans else 0
-        log_advanced_metrics("cotop", env.episode_energy, total_makespan, max_makespan)
+        log_advanced_metrics("cotop", env.episode_energy, env.episode_controlled_energy, total_makespan, max_makespan)
         
         if episode == MAX_EPISODES - 1:
             log_mobility_predictions(env)

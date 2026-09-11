@@ -66,6 +66,7 @@ class VECEnv:
         self.schedulers = {f"car_{i}": VehicleTaskScheduler(f"car_{i}") for i in range(40)}
         
         self.episode_energy = 0.0
+        self.episode_controlled_energy = 0.0
         self.episode_makespans = []
         self.mobility_predictions = {f"car_{i}": [] for i in range(40)}
         
@@ -270,6 +271,8 @@ class VECEnv:
                     
                     step_makespans.append(makespan)
                     step_energies.append(energy)
+                    if idx == controlled_idx:
+                        self.episode_controlled_energy += energy
 
             if len(step_makespans) > 0:
                 avg_makespan = sum(step_makespans) / len(step_makespans)

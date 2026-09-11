@@ -106,9 +106,30 @@ def generate_mobility_report():
     print(report_df.to_string(index=False))
     print("="*50)
 
+def plot_controlled_energy():
+    methods = {"CoTOP": "cotop_metrics.csv", "DDQN": "ddqn_metrics.csv", 
+               "Greedy": "greedy_metrics.csv", "Local": "local_metrics.csv"}
+    controlled_energy = {}
+    for name, file in methods.items():
+        path = f"../results/{file}"
+        if os.path.exists(path):
+            df = pd.read_csv(path)
+            if "controlled_energy" in df.columns:
+                controlled_energy[name] = df["controlled_energy"].mean()
+                
+    if controlled_energy:
+        plt.figure(figsize=(9, 6))
+        plt.bar(controlled_energy.keys(), controlled_energy.values(), color=['#2ca02c', '#1f77b4', '#ff7f0e', '#d62728'])
+        plt.title("Energy Consumed by the Algorithm's Own Decision (Controlled Vehicle Only)")
+        plt.ylabel('Energy (y units)')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig("../results/controlled_energy_comparison.png")
+
 if __name__ == "__main__":
     os.makedirs("../results", exist_ok=True)
     plot_baselines()
     plot_energy_and_makespan()
+    plot_controlled_energy()
     generate_mobility_report()
     plt.show()
