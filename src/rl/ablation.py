@@ -2,6 +2,8 @@ import sys
 import os
 import csv
 import torch
+import pandas as pd
+import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
@@ -48,6 +50,32 @@ def run_single_test(test_name, use_md, use_tp, use_co, agent):
     print(f"Result for {test_name}: {total_reward:.2f}")
     log_ablation_result(test_name, total_reward)
 
+def plot_ablation_results():
+    file_path = "../results/ablation_log.csv"
+    if not os.path.exists(file_path):
+        return
+        
+    df = pd.read_csv(file_path)
+    # برداشتن ۴ تست آخر در صورتی که فایل حاوی اجراهای قدیمی باشد
+    df = df.tail(4) 
+    
+    plt.figure(figsize=(9, 6))
+    bars = plt.bar(df["Test_Condition"], df["Total_Reward"], 
+                   color=['#2ca02c', '#1f77b4', '#ff7f0e', '#d62728'])
+    
+    for bar in bars:
+        yval = bar.get_height()
+        # نمایش عدد پاداش روی هر ستون
+        plt.text(bar.get_x() + bar.get_width()/2, yval, f'{int(yval)}', 
+                 ha='center', va='bottom' if yval > 0 else 'top', fontweight='bold')
+        
+    plt.title('Ablation Study: Impact of Each Module on Reward', fontsize=14, fontweight='bold')
+    plt.ylabel('Total Reward')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig("../results/ablation_chart.png")
+    plt.show()
+
 def run_ablation_studies(seed=0):
     print("Starting Ablation Studies...")
     if os.path.exists("../results/ablation_log.csv"):
@@ -67,3 +95,4 @@ def run_ablation_studies(seed=0):
 if __name__ == "__main__":
     seed_arg = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     run_ablation_studies(seed=seed_arg)
+    plot_ablation_results()  # این خط اضافه شد

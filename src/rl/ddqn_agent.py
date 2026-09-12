@@ -12,7 +12,7 @@ import csv
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
 
-TRAIN_EPISODES = 200
+TRAIN_EPISODES = 50
 EVAL_EPISODES = 50
 MAX_STEPS_PER_EPISODE = 300
 TAU = 0.005

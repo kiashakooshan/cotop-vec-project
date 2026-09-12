@@ -4,7 +4,8 @@ import numpy as np
 import math
 import os
 
-SEEDS = [0, 1, 2]
+# تغییر مهم: فقط Seed 0 را می‌خوانیم
+SEEDS = [0]
 
 def aggregate_metric(prefix, column, tail=50):
     """Read {prefix}_seed{N}.csv for every seed, return (mean, std) of 'column'."""
@@ -22,7 +23,7 @@ def aggregate_metric(prefix, column, tail=50):
 
 def plot_baselines_with_error_bars():
     print("\n" + "="*50)
-    print("📊 Generating Reward Comparison with Statistical Error...")
+    print("📊 Generating Reward Comparison...")
     methods = {"CoTOP (Ours)": "cotop_log", "DDQN": "ddqn_log", 
                "QRMP-DQN": "qrmpdqn_log", "Greedy": "greedy_log", "Local": "local_log"}
     
@@ -35,6 +36,7 @@ def plot_baselines_with_error_bars():
 
     if means:
         plt.figure(figsize=(10, 6))
+        # چون فقط ۱ اجرا داریم، yerr صفر خواهد بود اما کد بدون مشکل کار می‌کند
         bars = plt.bar(means.keys(), means.values(), 
                        yerr=[stds[k] for k in means.keys()], capsize=6,
                        color=['#2ca02c', '#1f77b4', '#9467bd', '#ff7f0e', '#d62728'])
@@ -44,15 +46,15 @@ def plot_baselines_with_error_bars():
             plt.text(bar.get_x() + bar.get_width()/2, yval - (abs(yval) * 0.05), f'{int(yval)}', 
                      ha='center', va='top', color='white', fontweight='bold')
             
-        plt.title(f'Average Reward Across {len(SEEDS)} Seeds (Mean ± Std) (Higher is Better)', fontsize=14, fontweight='bold')
+        plt.title('Average Reward Comparison (Higher is Better)', fontsize=14, fontweight='bold')
         plt.ylabel('Average Reward')
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig("../results/baseline_comparison_with_error.png")
+        plt.savefig("../results/baseline_comparison.png")
 
 def plot_energy_and_makespan_with_error_bars():
     print("\n" + "="*50)
-    print("⚡ Generating Detailed Energy & TOTAL Makespan Reports (Multi-Seed)...")
+    print("⚡ Generating Detailed Energy & TOTAL Makespan Reports...")
     methods = {"CoTOP": "cotop_metrics", "DDQN": "ddqn_metrics", 
                "QRMP-DQN": "qrmpdqn_metrics", "Greedy": "greedy_metrics", "Local": "local_metrics"}
     
@@ -60,20 +62,18 @@ def plot_energy_and_makespan_with_error_bars():
     makespan_means, makespan_stds = {}, {}
     
     for name, prefix in methods.items():
-        # خواندن میانگین انرژی
         e_m, e_s = aggregate_metric(prefix, "energy")
         if e_m is not None:
             energy_means[name] = e_m
             energy_stds[name] = e_s
             
-        # خواندن میانگین Makespan کل
         m_m, m_s = aggregate_metric(prefix, "total_makespan")
         if m_m is not None:
             makespan_means[name] = m_m
             makespan_stds[name] = m_s
             
     if energy_means:
-        print("\n--- Total Energy Consumption (Joules) [Mean] ---")
+        print("\n--- Total Energy Consumption (Joules) ---")
         for method, en in energy_means.items():
             print(f"🔹 {method}: {en:.2f} J")
             
@@ -88,10 +88,10 @@ def plot_energy_and_makespan_with_error_bars():
         plt.ylabel('Energy (Joules)')
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig("../results/energy_comparison_with_error.png")
+        plt.savefig("../results/energy_comparison.png")
 
     if makespan_means:
-        print("\n--- TOTAL Makespan of All Cars (Seconds) [Mean] ---")
+        print("\n--- TOTAL Makespan of All Cars (Seconds) ---")
         for method, ms in makespan_means.items():
             print(f"⏱️ {method}: {ms:.2f} s")
             
@@ -107,7 +107,7 @@ def plot_energy_and_makespan_with_error_bars():
         plt.title('TOTAL DAG Makespan Comparison (Lower is Better)', fontsize=14, fontweight='bold')
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig("../results/makespan_comparison_with_error.png")
+        plt.savefig("../results/makespan_comparison.png")
 
 def plot_controlled_energy_with_error_bars():
     methods = {"CoTOP": "cotop_metrics", "DDQN": "ddqn_metrics", 
@@ -125,11 +125,11 @@ def plot_controlled_energy_with_error_bars():
         plt.bar(controlled_energy_means.keys(), controlled_energy_means.values(), 
                 yerr=[controlled_energy_stds[k] for k in controlled_energy_means.keys()], capsize=6,
                 color=['#2ca02c', '#1f77b4', '#9467bd', '#ff7f0e', '#d62728'])
-        plt.title("Energy Consumed by the Algorithm's Own Decision (Controlled Vehicle Only)")
+        plt.title("Energy Consumed by the Algorithm's Own Decision")
         plt.ylabel('Energy (Joules)')
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig("../results/controlled_energy_comparison_with_error.png")
+        plt.savefig("../results/controlled_energy_comparison.png")
 
 def generate_mobility_report():
     print("\n" + "="*50)
