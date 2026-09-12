@@ -20,9 +20,11 @@ else:
     sys.exit("Error: Please declare environment variable 'SUMO_HOME'")
 
 class VECEnv:
-    def __init__(self, sumocfg_path, rsus_json_path="../sumo/rsus.json", 
-                 use_mobility_detector=True, use_priority=True, use_collaboration=True):
+    def __init__(self, sumocfg_path, rsus_json_path="../sumo/rsus.json",
+             use_mobility_detector=True, use_priority=True, use_collaboration=True,
+             sumo_port=None):
         self.sumocfg = sumocfg_path
+        self.sumo_port = sumo_port   # NEW: lets multiple SUMO instances run in parallel processes
         self.use_mobility_detector = use_mobility_detector
         self.use_priority = use_priority
         self.use_collaboration = use_collaboration
@@ -55,29 +57,31 @@ class VECEnv:
             self.mobility_model.eval()
 
     def reset(self, render=False):
-        if render:
-            traci.start(["sumo-gui", "-c", self.sumocfg, "--no-warnings"])
+        cmd = ["sumo-gui" if render else "sumo", "-c", self.sumocfg, "--no-warnings"]
+        if not render:
+            cmd += ["--start", "--quit-on-end"]
+        if self.sumo_port is not None:
+            traci.start(cmd, port=self.sumo_port)   # NEW: each worker gets its own port
         else:
-            traci.start(["sumo", "-c", self.sumocfg, "--start", "--quit-on-end", "--no-warnings"])
+            traci.start(cmd)
             
         self.current_time = 0
         self.fleet_manager.spawn_fixed_fleet()
-        
         self.schedulers = {f"car_{i}": VehicleTaskScheduler(f"car_{i}") for i in range(40)}
-        
+
         self.episode_energy = 0.0
         self.episode_controlled_energy = 0.0
         self.episode_makespans = []
         self.mobility_predictions = {f"car_{i}": [] for i in range(40)}
-        
         self.last_dag_features = {f"car_{i}": [0.0, 0.0, 0.0] for i in range(40)}
         self.pending_predictions = {}
-        
+
         for node in self.rsu_nodes:
             for p in node.processors:
                 p.free_at = 0.0
-                
-        return self._get_state()
+
+        vehicle_ids = [v for v in traci.vehicle.getIDList() if v.startswith("car_")]
+        return self._get_all_states(vehicle_ids[:40])   # <-- returns a LIST now, not a single vector
         
     def _get_nearest_rsu_node(self, pos):
         nearest_idx = 0
@@ -182,112 +186,96 @@ class VECEnv:
         makespan = max([task_results[t]["finish_time"] for t in dag["exit_tasks"]]) - dag["release_time"]
         return makespan, total_energy
 
-    def step(self, action):
+    def step(self, actions):
+        """
+        actions: a LIST of ints, one per currently-active vehicle (aligned by index
+        with the vehicle order of the previous state list). Every vehicle is now
+        genuinely controlled by the shared policy -- there is no more "background
+        traffic" that bypasses the algorithm's decision.
+        """
         traci.simulationStep()
         self.current_time += 1
         self.fleet_manager.keep_fleet_closed()
-        
+
         raw_vehicle_ids = traci.vehicle.getIDList()
         vehicle_ids = [v for v in raw_vehicle_ids if v.startswith("car_")]
-        
         done = traci.simulation.getMinExpectedNumber() <= 0
         reward = 0
-        
+
         if len(vehicle_ids) > 0:
-            active_vehicles = vehicle_ids[:40] 
+            active_vehicles = vehicle_ids[:40]
             all_positions = [traci.vehicle.getPosition(v) for v in active_vehicles]
-            
             pos_dict = {v_id: pos for v_id, pos in zip(active_vehicles, all_positions)}
-            
+
             if self.use_mobility_detector:
                 x_seq = torch.tensor(all_positions, dtype=torch.float32).unsqueeze(1)
-                
-                edges = build_graph(active_vehicles, pos_dict, max_distance=100.0) 
-                
+                edges = build_graph(active_vehicles, pos_dict, max_distance=100.0)
                 with torch.no_grad():
                     predicted_futures = self.mobility_model(x_seq, [edges], future_steps=1)
-                
+
                 for v_id in active_vehicles:
                     if v_id in self.pending_predictions:
                         predicted_pos = self.pending_predictions[v_id]
                         actual_pos_now = pos_dict.get(v_id)
                         if actual_pos_now is not None:
                             self.mobility_predictions[v_id].append((predicted_pos, actual_pos_now))
-                
+
                 for idx, v_id in enumerate(active_vehicles):
                     pred_pos = (predicted_futures[idx][0][0].item(), predicted_futures[idx][0][1].item())
                     self.pending_predictions[v_id] = pred_pos
 
-            selected_rsu_idx = action if action < len(self.rsu_nodes) else 0
-            main_rsu_node = self.rsu_nodes[selected_rsu_idx]
-            
             step_makespans = []
             step_energies = []
-
-            controlled_idx = self.current_time % len(active_vehicles)
 
             for idx in range(len(active_vehicles)):
                 v_id = active_vehicles[idx]
                 pos = all_positions[idx]
-                
                 scheduler = self.schedulers.get(v_id)
-                
+
                 if scheduler and scheduler.should_generate(self.current_time):
                     new_dag = generate_task_dag(v_id, self.current_time)
-                    
+
                     total_rho = sum(t["rho"] for t in new_dag["tasks"].values())
                     total_phi = sum(t["phi"] for t in new_dag["tasks"].values())
                     max_d = max(t["d"] for t in new_dag["tasks"].values())
-                    
                     self.last_dag_features[v_id] = [total_rho / 50.0, total_phi / 50.0, max_d / 20.0]
-                    
                     scheduler.schedule_next(self.current_time)
-                    
-                    if idx == controlled_idx:
-                        target_rsu = main_rsu_node
-                    else:
-                        target_rsu = self._get_nearest_rsu_node(pos)
-                        
+
+                    # EVERY vehicle now uses its OWN action from the shared policy
+                    action = actions[idx] if idx < len(actions) else 0
+                    selected_rsu_idx = action if action < len(self.rsu_nodes) else 0
+                    target_rsu = self.rsu_nodes[selected_rsu_idx]
+
                     target_rsu_data = next(r for r in self.rsus if r["id"] == target_rsu.id)
                     dist_to_rsu = math.dist(pos, (target_rsu_data["x"], target_rsu_data["y"]))
+
                     if self.use_mobility_detector and v_id in self.pending_predictions:
                         predicted_pos = self.pending_predictions[v_id]
                         predicted_t_stay = self._estimate_t_stay(
-                            current_pos=pos,
-                            predicted_pos=predicted_pos,
+                            current_pos=pos, predicted_pos=predicted_pos,
                             rsu_pos=(target_rsu_data["x"], target_rsu_data["y"]),
-                            rsu_range=target_rsu_data.get("range", 400.0)
-                        )
+                            rsu_range=target_rsu_data.get("range", 400.0))
                     else:
-                        # fallback heuristic — used when mobility detector is OFF (ablation "w/o_MD")
                         predicted_t_stay = max(0.1, (target_rsu_data.get("range", 400.0) - dist_to_rsu) / 15.0)
 
                     makespan, energy = self._schedule_dag_on_rsu(
-                        new_dag, 
-                        target_rsu, 
-                        predicted_t_stay=predicted_t_stay,
-                        use_collaboration=(idx == controlled_idx and self.use_collaboration)
-                    )
-                    
+                        new_dag, target_rsu, predicted_t_stay=predicted_t_stay,
+                        use_collaboration=self.use_collaboration)   # now applies to EVERY vehicle
+
                     step_makespans.append(makespan)
                     step_energies.append(energy)
-                    if idx == controlled_idx:
-                        self.episode_controlled_energy += energy
+                    self.episode_controlled_energy += energy   # every task is now "controlled"
 
             if len(step_makespans) > 0:
                 avg_makespan = sum(step_makespans) / len(step_makespans)
                 avg_energy = sum(step_energies) / len(step_energies)
-                
                 self.episode_energy += sum(step_energies)
                 self.episode_makespans.extend(step_makespans)
-                
                 sigma_w = 0.6
                 reward = -(sigma_w * avg_makespan + (1 - sigma_w) * avg_energy)
-            else:
-                reward = 0  
-                
-        next_state = self._get_state(vehicle_ids)
-        return next_state, reward, done, []
+
+        next_states = self._get_all_states(vehicle_ids[:40] if vehicle_ids else [])
+        return next_states, reward, done, []
 
     def _get_state(self, vehicle_ids=None):
         if vehicle_ids is None:
@@ -316,3 +304,20 @@ class VECEnv:
 
     def close(self):
         traci.close()
+
+    def _get_all_states(self, vehicle_ids):
+        """Return one state vector PER vehicle (parameter-sharing multi-agent setup)."""
+        rsu_load = []
+        for node in self.rsu_nodes:
+            avg_free_time = sum(p.free_at for p in node.processors) / len(node.processors)
+            load = max(0, avg_free_time - self.current_time)
+            rsu_load.append(load / 50.0)
+
+        states = []
+        for v_id in vehicle_ids:
+            pos = traci.vehicle.getPosition(v_id)
+            state = [pos[0] / 2000.0, pos[1] / 1000.0]
+            state.extend(self.last_dag_features.get(v_id, [0.0, 0.0, 0.0]))
+            state.extend(rsu_load)
+            states.append(np.array(state, dtype=np.float32))
+        return states

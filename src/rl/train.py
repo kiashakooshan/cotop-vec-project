@@ -4,6 +4,7 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import random
+import numpy as np
 import csv
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -12,7 +13,7 @@ from rl.a3c_agent import ActorCritic
 
 def log_episode(method_name, episode, total_reward):
     os.makedirs("../results", exist_ok=True)
-    file_path = f"../results/{method_name}_log.csv"
+    file_path = f"../results/{method_name}.csv"
     write_header = not os.path.exists(file_path)
     with open(file_path, "a", newline="") as f:
         writer = csv.writer(f)
@@ -20,58 +21,68 @@ def log_episode(method_name, episode, total_reward):
             writer.writerow(["episode", "reward"])
         writer.writerow([episode, total_reward])
 
-def train_cotop():
-    epochs = 200 
-    print(f"🚀 Starting The Grand CoTOP Training ({epochs} Episodes) with 11D Vision...")
+def train_cotop(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    epochs = 200
+    print(f"Starting CoTOP training (seed={seed}, {epochs} episodes) -- ALL 40 vehicles controlled")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
-    
     agent = ActorCritic(11, 6)
     optimizer = optim.Adam(agent.parameters(), lr=0.0002)
-    
-    if os.path.exists("../results/cotop_train_log.csv"):
-        os.remove("../results/cotop_train_log.csv")
-        
+
+    log_name = f"cotop_train_seed{seed}"
+    if os.path.exists(f"../results/{log_name}.csv"):
+        os.remove(f"../results/{log_name}.csv")
+
     for episode in range(epochs):
-        state = env.reset(render=False)
+        states = env.reset(render=False)
         total_reward = 0
         epsilon = max(0.01, 0.5 - (episode / (epochs * 0.8)))
-        
+
         for step in range(300):
-            state_tensor = torch.FloatTensor(state)
-            action_probs, state_value = agent(state_tensor)
-            
-            if random.random() < epsilon:
-                action = random.randint(0, 5)
-            else:
-                action = torch.argmax(action_probs).item()
-                
-            next_state, reward, done, _ = env.step(action)
+            actions, log_probs, values = [], [], []
+            for s in states:
+                state_t = torch.FloatTensor(s)
+                action_probs, state_value = agent(state_t)
+                if random.random() < epsilon:
+                    action = random.randint(0, 5)
+                else:
+                    action = torch.argmax(action_probs).item()
+                actions.append(action)
+                log_probs.append(torch.log(action_probs[action] + 1e-10))
+                values.append(state_value)
+
+            next_states, reward, done, _ = env.step(actions)
             total_reward += reward
-            
             scaled_reward = reward / 1000.0
-            advantage = scaled_reward - state_value.item()
-            
-            log_prob = torch.log(action_probs[action] + 1e-10)
-            actor_loss = -log_prob * advantage
-            
-            reward_tensor = torch.tensor([scaled_reward], dtype=torch.float32)
-            critic_loss = F.mse_loss(state_value.squeeze(), reward_tensor.squeeze())
-            
-            loss = actor_loss + critic_loss
-            
+
+            # shared global reward -> independent parameter-shared actor-critic update
+            loss = 0.0
+            target = torch.tensor(scaled_reward, dtype=torch.float32)
+            for log_prob, value in zip(log_probs, values):
+                advantage = scaled_reward - value.item()
+                actor_loss = -log_prob * advantage
+                critic_loss = F.mse_loss(value.squeeze(), target)
+                loss = loss + actor_loss + critic_loss
+            loss = loss / len(log_probs)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            state = next_state
-            if done: break
-            
-        print(f"✅ Grand Train - Ep {episode+1}/{epochs} | Raw Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
-        log_episode("cotop_train", episode + 1, total_reward)
+
+            states = next_states
+            if done:
+                break
+
+        print(f"Ep {episode+1}/{epochs} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
+        log_episode(log_name, episode + 1, total_reward)
         env.close()
-        
-    torch.save(agent.state_dict(), "cotop_model_final.pth")
-    print("💾 Ultimate 11D brain saved as 'cotop_model_final.pth'!")
+
+    torch.save(agent.state_dict(), f"cotop_model_seed{seed}.pth")
+    print(f"Saved cotop_model_seed{seed}.pth")
 
 if __name__ == "__main__":
-    train_cotop()
+    seed_arg = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    train_cotop(seed=seed_arg)
