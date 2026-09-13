@@ -72,6 +72,7 @@ def train_cotop(seed=0):
                 loss = loss / len(log_probs)
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=1.0) 
                 optimizer.step()
                 
             states = next_states

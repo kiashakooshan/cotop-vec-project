@@ -9,7 +9,7 @@ from collections import deque
 import csv
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
-TRAIN_EPISODES = 200
+TRAIN_EPISODES = 50
 EVAL_EPISODES = 50
 MAX_STEPS_PER_EPISODE = 300
 N_QUANTILES = 8
@@ -105,6 +105,7 @@ def run_qrmp_dqn(seed=0):
                 loss = quantile_huber_loss(current_quantiles, target_quantiles, taus)
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(online_net.parameters(), max_norm=1.0) 
                 optimizer.step()
                 for tp, lp in zip(target_net.parameters(), online_net.parameters()):
                     tp.data.copy_(TAU * lp.data + (1 - TAU) * tp.data)

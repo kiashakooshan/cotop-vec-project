@@ -64,7 +64,7 @@ class VECEnv:
             traci.start(cmd, port=self.sumo_port)   # NEW: each worker gets its own port
         else:
             traci.start(cmd)
-            
+
         self.current_time = 0
         self.fleet_manager.spawn_fixed_fleet()
         self.schedulers = {f"car_{i}": VehicleTaskScheduler(f"car_{i}") for i in range(40)}
@@ -246,6 +246,13 @@ class VECEnv:
                     selected_rsu_idx = action if action < len(self.rsu_nodes) else 0
                     target_rsu = self.rsu_nodes[selected_rsu_idx]
 
+                    MAX_BACKLOG = 30.0  # simulation-time units; implements the paper's constraint C3 (N_queue <= C_RSU)
+                    # ... right after: target_rsu = self.rsu_nodes[selected_rsu_idx]
+                    backlog = min(p.free_at for p in target_rsu.processors) - self.current_time
+                    if backlog > MAX_BACKLOG:
+                    # Constraint C3 would be violated -> reroute to the least-loaded RSU in the whole system,
+                    # exactly like Greedy would, as a safety net against runaway queues
+                        target_rsu = min(self.rsu_nodes, key=lambda node: min(p.free_at for p in node.processors))
                     target_rsu_data = next(r for r in self.rsus if r["id"] == target_rsu.id)
                     dist_to_rsu = math.dist(pos, (target_rsu_data["x"], target_rsu_data["y"]))
 

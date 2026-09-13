@@ -108,6 +108,7 @@ def run_ddqn(seed=0):
                 loss = F.mse_loss(current_q, target_q.detach())
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(online_net.parameters(), max_norm=1.0) 
                 optimizer.step()
 
                 for target_param, local_param in zip(target_net.parameters(), online_net.parameters()):
