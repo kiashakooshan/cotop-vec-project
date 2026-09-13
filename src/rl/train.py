@@ -25,7 +25,7 @@ def train_cotop(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    epochs = 50
+    epochs = 100
     print(f"Starting CoTOP training (seed={seed}, {epochs} episodes) -- ALL 40 vehicles controlled")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     agent = ActorCritic(11, 6)

@@ -124,7 +124,7 @@ class VECEnv:
         total_energy = 0.0
         BASE_CAPACITY = 2.0
         E_V2R = 0.5
-        E_R2R = 0.2
+        E_R2R = 1.2
         
         rsu_data = next(r for r in self.rsus if r["id"] == primary_rsu.id)
         rsu_pos = (rsu_data["x"], rsu_data["y"])
@@ -159,6 +159,8 @@ class VECEnv:
             full_processing_time = task["phi"] / (BASE_CAPACITY * proc.speed_factor)
             
             if use_collaboration and (start_time + full_processing_time - dag["release_time"]) > predicted_t_stay:
+                handoff_penalty = 5.0   # NEW: small explicit signal that a handoff happened
+                total_energy += handoff_penalty
                 time_available = max(0.0, predicted_t_stay - (start_time - dag["release_time"]))
                 phi_done_locally = time_available * BASE_CAPACITY * proc.speed_factor
                 phi_rest = max(0.0, task["phi"] - phi_done_locally)

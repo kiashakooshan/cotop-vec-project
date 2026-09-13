@@ -49,7 +49,7 @@ def generate_task_dag(veh_id, current_time, min_tasks=4, max_tasks=10):
                 "layer": layer_idx,
                 "rho": random.uniform(1.0, 4.0),  # حجم داده (MB)
                 "phi": random.uniform(0.5, 5.0),  # توان پردازشی مورد نیاز
-                "d": random.uniform(5.0, 15.0),   # مهلت مجاز برای همین زیروظیفه
+                "d": random.uniform(3.0, 8.0),   # مهلت مجاز برای همین زیروظیفه
                 "parents": [],
                 "children": [],
                 "in_edges": {} # حجم داده‌ای که باید از والد به این گره منتقل شود
