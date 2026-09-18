@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import random
 import numpy as np
 import csv
+from collections import deque
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.vec_env import VECEnv
@@ -25,13 +26,19 @@ def train_cotop(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    epochs = 100
-    print(f"Starting CoTOP training (seed={seed}, {epochs} episodes) -- ALL 40 vehicles controlled")
+    
+    # 1. افزایش اپیزود آموزش طبق سند برای جبران On-policy بودن
+    epochs = 100 
+    
+    print(f"🚀 Starting CoTOP training with Replay Buffer (seed={seed}, {epochs} episodes)...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")
     agent = ActorCritic(11, 6)
     optimizer = optim.Adam(agent.parameters(), lr=0.0002)
-    log_name = f"cotop_train_seed{seed}"
     
+    # 2. اضافه شدن Replay Buffer برای تکرار یادگیری از تجربیات گذشته
+    replay_buffer = deque(maxlen=5000)
+    
+    log_name = f"cotop_train_seed{seed}"
     if os.path.exists(f"../results/{log_name}.csv"):
         os.remove(f"../results/{log_name}.csv")
         
@@ -59,7 +66,11 @@ def train_cotop(seed=0):
             total_reward += reward
             scaled_reward = reward / 1000.0
             
-            # فقط زمانی شبکه را آپدیت کن که حداقل ۱ ماشین در محیط وجود داشته باشد
+            # ذخیره کردن تجربه در حافظه
+            if len(log_probs) > 0:
+                replay_buffer.append((states, actions, scaled_reward, next_states))
+            
+            # یادگیری عادی (On-policy) از تجربه همین لحظه
             if len(log_probs) > 0:
                 loss = 0.0
                 target = torch.tensor(scaled_reward, dtype=torch.float32)
@@ -75,16 +86,34 @@ def train_cotop(seed=0):
                 torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=1.0) 
                 optimizer.step()
                 
+            # 3. مرور خاطرات گذشته (Off-policy Replay) برای تقویت هوش شبکه
+            if len(replay_buffer) > 200:
+                for _ in range(3): # سه بار یادگیری اضافه در هر گام
+                    old_states, old_actions, old_reward, _ = random.choice(replay_buffer)
+                    if len(old_actions) > 0:
+                        extra_loss = 0.0
+                        for s, a in zip(old_states, old_actions):
+                            state_t = torch.FloatTensor(s)
+                            action_probs, value = agent(state_t)
+                            advantage = old_reward - value.item()
+                            extra_loss += -torch.log(action_probs[a] + 1e-10) * advantage
+                        
+                        extra_loss = extra_loss / len(old_actions)
+                        optimizer.zero_grad()
+                        extra_loss.backward()
+                        torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=1.0)
+                        optimizer.step()
+                
             states = next_states
             if done:
                 break
                 
-        print(f"Ep {episode+1}/{epochs} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
+        print(f"⚙️ Ep {episode+1}/{epochs} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
         log_episode(log_name, episode + 1, total_reward)
         env.close()
         
     torch.save(agent.state_dict(), f"cotop_model_seed{seed}.pth")
-    print(f"Saved cotop_model_seed{seed}.pth")
+    print(f"💾 Saved supercharged cotop_model_seed{seed}.pth")
 
 if __name__ == "__main__":
     seed_arg = int(sys.argv[1]) if len(sys.argv) > 1 else 0
