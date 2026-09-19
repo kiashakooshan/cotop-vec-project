@@ -28,7 +28,7 @@ def train_cotop(seed=0):
     torch.manual_seed(seed)
     
     # 1. افزایش اپیزود آموزش طبق سند برای جبران On-policy بودن
-    epochs = 100 
+    epochs = 300 
     
     print(f"🚀 Starting CoTOP training with Replay Buffer (seed={seed}, {epochs} episodes)...")
     env = VECEnv("../sumo/osm.sumocfg", "../sumo/rsus.json")

@@ -278,10 +278,11 @@ class VECEnv:
             if len(step_makespans) > 0:
                 avg_makespan = sum(step_makespans) / len(step_makespans)
                 avg_energy = sum(step_energies) / len(step_energies)
+                #print(f"DEBUG raw avg_makespan={avg_makespan:.2f} raw avg_energy={avg_energy:.2f}")
                 self.episode_energy += sum(step_energies)
                 self.episode_makespans.extend(step_makespans)
-                normalized_makespan = avg_makespan / 50.0   # typical per-task makespan scale
-                normalized_energy = avg_energy / 100.0      # typical per-task energy scale
+                normalized_makespan = avg_makespan / 15.0
+                normalized_energy = avg_energy / 50.0
                 sigma_w = 0.6
                 reward = -(sigma_w * normalized_makespan + (1 - sigma_w) * normalized_energy)
 
